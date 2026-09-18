@@ -1,0 +1,1 @@
+const C='hp-blog-v2',A=['./','./index.html','./styles.css','./app.js','./demo.json'];self.addEventListener('install',e=>e.waitUntil(caches.open(C).then(c=>c.addAll(A))));self.addEventListener('fetch',e=>{if(new URL(e.request.url).pathname.endsWith('demo.json'))return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)))});
