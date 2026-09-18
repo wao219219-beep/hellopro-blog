@@ -7,16 +7,23 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .mainloading .loaderdots i:nth-child(2){animation-delay:.15s}.mainloading .loaderdots i:nth-child(3){animation-delay:.3s}
 @keyframes hpPulse{from{opacity:.35;transform:translateY(0)}to{opacity:1;transform:translateY(-4px)}}
 
-/* v0.7 UI */
-.top{min-height:116px!important;position:relative!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:14px 58px 10px!important;overflow:hidden}
-.hp-idols{position:absolute;bottom:7px;width:108px;height:46px;object-fit:cover;object-position:center;image-rendering:pixelated;pointer-events:none}
-.hp-idols.left{left:6px}.hp-idols.right{right:6px}
-.brand{position:relative;z-index:2;text-align:center!important;display:flex!important;flex-direction:column!important;gap:5px!important;align-items:center!important;font-size:25px!important;line-height:1.05}
+/* v0.7.1 UI */
+.top{height:118px!important;min-height:118px!important;position:relative!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:12px 68px 8px!important;overflow:hidden}
+.hp-idols{position:absolute;bottom:8px;width:118px;height:auto;object-fit:contain;image-rendering:pixelated;pointer-events:none;z-index:1}
+.hp-idols.left{left:8px}.hp-idols.right{right:8px}
+.hp-idols.mobile{display:none}
+.brand{position:relative;z-index:2;text-align:center!important;display:flex!important;flex-direction:column!important;gap:7px!important;align-items:center!important;font-size:25px!important;line-height:1.05;white-space:nowrap}
 .brand .dots{order:2}.brand .dots i{width:8px!important;height:8px!important}
 .top .iconbtn{position:absolute!important;right:10px!important;top:10px!important;z-index:4}
 .card.fav{outline:2px solid #f3bd24!important;outline-offset:-2px;box-shadow:0 8px 22px rgba(229,171,0,.16)!important}
 .card.fav .star{color:#e9ad00!important}
-@media(max-width:430px){.hp-idols{width:92px;height:42px}.top{padding-left:72px!important;padding-right:72px!important}.brand{font-size:23px!important}}
+@media(max-width:430px){
+ .top{height:112px!important;min-height:112px!important;padding:10px 70px 6px!important}
+ .hp-idols.desktop{display:none!important}.hp-idols.mobile{display:block!important;width:70px!important;height:auto!important;bottom:7px!important}
+ .hp-idols.left{left:8px!important}.hp-idols.right{right:8px!important}
+ .brand{font-size:22px!important;gap:6px!important;transform:translateY(-7px)}
+ .top .iconbtn{right:8px!important;top:8px!important;width:48px!important;height:48px!important}
+}
 
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
@@ -99,7 +106,7 @@ window.backGroups=()=>{state.group=null;state.member='all';state.posts=[];saveNa
 function card(p){let f=favs().has(p.member),r=reads().has(p.id);return `<article class="card ${r?'read':''} ${f?'fav':''}" style="--member:${p.memberColor||'#aaa'}" onclick="openPost('${esc(p.id)}','${esc(p.url)}')"><button class="star" onclick="event.stopPropagation();toggleFav('${esc(p.member)}')">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${esc(p.group)} · ${rel(p.date)} ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${esc(p.member)} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=(id,url)=>{let s=reads();s.add(id);saveSet('hp_reads',s);sessionStorage.setItem('hp_scroll',String(scrollY));render();location.href=url};window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
-function topBar(){return `<header class="top"><img class="hp-idols left" src="./assets/idols-left.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right" src="./assets/idols-right.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
+function topBar(){return `<header class="top"><img class="hp-idols left desktop" src="./assets/idols-left.png" alt=""><img class="hp-idols left mobile" src="./assets/idols-left-mobile.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right desktop" src="./assets/idols-right.png" alt=""><img class="hp-idols right mobile" src="./assets/idols-right-mobile.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
 function loadingMain(){return `<div class="mainloading"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span><div>記事を取得しています…</div></div>`}
 function moreButton(){return state.hasMore?`<button class="more" onclick="loadMore()" ${state.loadingMore?'disabled':''}>${state.loadingMore?'記事を取得しています…':'さらに読み込む'}</button>`:''}
 function latest(){

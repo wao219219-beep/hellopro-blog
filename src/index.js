@@ -73,7 +73,7 @@ async function enrichMissingImages(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.0)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.1)',
             'Accept':'text/html,application/xhtml+xml'
           },
           // Article pages rarely change after publication. Reuse Cloudflare's
@@ -97,27 +97,45 @@ async function enrichMissingImages(posts){
 }
 
 function parseRSS(xml,groupId,group){let items=xml.match(/<item\b[\s\S]*?<\/item>/gi)||[];return items.map(b=>{let title=text(tag(b,'title')),url=text(tag(b,'link')),desc=tag(b,'description')||tag(b,'content:encoded'),member=memberFrom(title,desc)||group;let d=tag(b,'pubDate');return {id:url||tag(b,'guid'),groupId,group,member,memberColor:COLORS[member]||'#A0A0A8',title:title.replace(new RegExp(`\\s*[｜|]?\\s*${member}\\s*$`),'').trim()||title,date:safeISO(d),url,image:rssImage(b,desc)}}).filter(x=>x.url&&x.date)}
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.0)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
-function parseKenshu(html){let out=[],re=/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?研修生リハーサル日記[\s\S]*?)<\/a>/gi,m;while((m=re.exec(html))){let t=text(m[2]),dm=t.match(/(20\d{2})[.\/-](\d{2})[.\/-](\d{2})\s+(.+)$/);if(!dm)continue;let url=new URL(m[1],'https://www.upfc.jp').href,member=dm[4].trim();out.push({id:url,groupId:'kenshusei',group:'ハロプロ研修生',member,memberColor:'#A0A0A8',title:'Hello! Project 研修生リハーサル日記',date:`${dm[1]}-${dm[2]}-${dm[3]}T12:00:00+09:00`,url,image:''})}return out}
-
-async function getPostIndex(){
-  const settled=await Promise.allSettled(BLOGS.map(fetchBlog));
-  let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);
-  const sources=settled.map((x,i)=>({
-    source:BLOGS[i][2],ok:x.status==='fulfilled',
-    count:x.status==='fulfilled'?x.value.posts.length:0,
-    error:x.status==='rejected'?String(x.reason?.message||x.reason):''
-  }));
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.1)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+function canonicalKenshuDetail(raw=''){
   try{
-    const r=await fetch('https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI',{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.0)'},cf:{cacheEverything:true,cacheTtl:90}});
-    if(r.ok) posts.push(...parseKenshu(await r.text()));
-  }catch(_){}
-  const cutoff=Date.now()-30*864e5,seen=new Set();
-  posts=posts
-    .filter(p=>new Date(p.date).getTime()>=cutoff)
-    .sort((a,b)=>new Date(b.date)-new Date(a.date))
-    .filter(p=>!seen.has(p.id)&&seen.add(p.id));
-  return {posts,sources};
+    const u=new URL(decode(raw),'https://www.upfc.jp');
+    if(u.hostname!=='www.upfc.jp' || !u.pathname.endsWith('/helloproject/artist/trcontents_detail.php')) return '';
+    // Every real diary entry has its own @uid. Reject TOP/list/navigation links.
+    const uid=u.searchParams.get('@uid');
+    if(!uid) return '';
+    const clean=new URL('https://www.upfc.jp/helloproject/artist/trcontents_detail.php');
+    clean.searchParams.set('@rst','all');
+    clean.searchParams.set('@uid',uid);
+    // Preserve these when UP-FC supplies them, but they are not required.
+    for(const k of ['ccid','gid']) if(u.searchParams.get(k)) clean.searchParams.set(k,u.searchParams.get(k));
+    return clean.href;
+  }catch(_){return ''}
+}
+function parseKenshu(html){
+  const out=[],seen=new Set();
+  const re=/<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let m;
+  while((m=re.exec(html))){
+    const href=(m[1].match(/\bhref\s*=\s*["']([^"']+)["']/i)||[])[1]||'';
+    const url=canonicalKenshuDetail(href);
+    if(!url) continue;
+    const t=text(m[2]);
+    if(!/研修生リハーサル日記/.test(t)) continue;
+    const dm=t.match(/(20\d{2})[.\/-](\d{2})[.\/-](\d{2})\s+(.+)$/);
+    if(!dm) continue;
+    const member=dm[4].trim();
+    const uid=new URL(url).searchParams.get('@uid');
+    if(!uid||seen.has(uid)) continue;
+    seen.add(uid);
+    out.push({
+      id:`kenshusei:${uid}`,groupId:'kenshusei',group:'ハロプロ研修生',
+      member,memberColor:'#A0A0A8',title:'Hello! Project 研修生リハーサル日記',
+      date:`${dm[1]}-${dm[2]}-${dm[3]}T12:00:00+09:00`,url,image:''
+    });
+  }
+  return out;
 }
 
 async function handler(req){
