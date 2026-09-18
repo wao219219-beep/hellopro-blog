@@ -73,7 +73,7 @@ async function enrichMissingImages(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.1)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.2)',
             'Accept':'text/html,application/xhtml+xml'
           },
           // Article pages rarely change after publication. Reuse Cloudflare's
@@ -97,7 +97,7 @@ async function enrichMissingImages(posts){
 }
 
 function parseRSS(xml,groupId,group){let items=xml.match(/<item\b[\s\S]*?<\/item>/gi)||[];return items.map(b=>{let title=text(tag(b,'title')),url=text(tag(b,'link')),desc=tag(b,'description')||tag(b,'content:encoded'),member=memberFrom(title,desc)||group;let d=tag(b,'pubDate');return {id:url||tag(b,'guid'),groupId,group,member,memberColor:COLORS[member]||'#A0A0A8',title:title.replace(new RegExp(`\\s*[｜|]?\\s*${member}\\s*$`),'').trim()||title,date:safeISO(d),url,image:rssImage(b,desc)}}).filter(x=>x.url&&x.date)}
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.1)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.2)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function canonicalKenshuDetail(raw=''){
   try{
     const u=new URL(decode(raw),'https://www.upfc.jp');
@@ -136,6 +136,45 @@ function parseKenshu(html){
     });
   }
   return out;
+}
+
+async function getPostIndex(){
+  const settled=await Promise.allSettled(BLOGS.map(fetchBlog));
+  let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);
+  const sources=settled.map((x,i)=>({
+    source:BLOGS[i][2],
+    ok:x.status==='fulfilled',
+    count:x.status==='fulfilled'?x.value.posts.length:0,
+    error:x.status==='rejected'?String(x.reason?.message||x.reason):''
+  }));
+
+  try{
+    const listUrl='https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI';
+    const r=await fetch(listUrl,{
+      headers:{
+        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.7.2)',
+        'Accept':'text/html,application/xhtml+xml'
+      },
+      cf:{cacheEverything:true,cacheTtl:90}
+    });
+    if(r.ok){
+      const kposts=parseKenshu(await r.text());
+      posts.push(...kposts);
+      sources.push({source:'KENSYUSEI',ok:true,count:kposts.length,error:''});
+    }else{
+      sources.push({source:'KENSYUSEI',ok:false,count:0,error:`HTTP ${r.status}`});
+    }
+  }catch(e){
+    sources.push({source:'KENSYUSEI',ok:false,count:0,error:String(e?.message||e)});
+  }
+
+  const cutoff=Date.now()-30*864e5,seen=new Set();
+  posts=posts
+    .filter(p=>p.date && new Date(p.date).getTime()>=cutoff)
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .filter(p=>p.id && !seen.has(p.id) && seen.add(p.id));
+
+  return {posts,sources};
 }
 
 async function handler(req){
@@ -178,7 +217,7 @@ export default {
     if (url.pathname === '/api/posts') {
       try { return await handler(request); }
       catch (error) {
-        return new Response(JSON.stringify({ posts: [], error: 'feed_fetch_failed' }), {
+        return new Response(JSON.stringify({ posts: [], error: 'feed_fetch_failed', detail: String(error?.message || error) }), {
           status: 502,
           headers: { ...cors(), 'content-type': 'application/json;charset=utf-8', 'cache-control': 'no-store' }
         });
