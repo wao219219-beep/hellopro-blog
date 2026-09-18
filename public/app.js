@@ -1,3 +1,7 @@
+const mobileFix=document.createElement('style');mobileFix.textContent=`
+.member-chips{display:flex!important;flex-wrap:wrap!important;overflow:visible!important;white-space:normal!important;gap:8px!important;padding-bottom:8px}
+.member-chips .chip{flex:0 0 auto;margin:0!important}
+`;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
 const groups=[
  {id:'morningmusume',name:"モーニング娘。'26",color:'#e84d8a'}, {id:'angerme',name:'アンジュルム',color:'#f05a66'},
@@ -18,7 +22,19 @@ const favs=()=>new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]')); const
 const saveSet=(k,s)=>localStorage.setItem(k,JSON.stringify([...s]));
 function isNew(p){return !reads().has(p.id) && Date.now()-new Date(p.date).getTime()<48*3600e3}
 function rel(d){let x=Date.now()-new Date(d),m=Math.floor(x/60000),h=Math.floor(x/3600000);if(m<60)return `${Math.max(1,m)}分前`;if(h<24)return `${h}時間前`;if(h<48)return `昨日 ${new Date(d).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}`;return new Date(d).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
-async function load(show=true){state.loading=show;render();try{let r=await fetch(API,{cache:'no-store'});let j=await r.json();let old=new Set(state.posts.map(x=>x.id));state.posts=(j.posts||[]).filter(p=>Date.now()-new Date(p.date)<30*864e5).sort((a,b)=>new Date(b.date)-new Date(a.date));let n=state.posts.filter(p=>!old.has(p.id)).length;if(old.size&&n){state.banner=`✨ 新しい記事が${n}件あります`;setTimeout(()=>{state.banner='';render()},3500)}}catch(e){console.error('Blog API error',e);state.posts=[];state.banner='ブログ取得に失敗しました。しばらくしてから再読み込みしてください。'}state.loading=false;render()}
+async function load(show=true){
+ const keep={tab:state.tab,group:state.group,member:state.member,y:scrollY};
+ state.loading=show;render();
+ try{
+  let r=await fetch(API+'?ts='+Date.now(),{cache:'no-store'}),j=await r.json();
+  let old=new Set(state.posts.map(x=>x.id));
+  state.posts=(j.posts||[]).filter(p=>Date.now()-new Date(p.date)<30*864e5).sort((a,b)=>new Date(b.date)-new Date(a.date));
+  state.tab=keep.tab;state.group=keep.group;state.member=keep.member;
+  let fresh=state.posts.filter(p=>!old.has(p.id)&&(keep.tab!=='groups'||!keep.group||p.groupId===keep.group)).length;
+  if(old.size&&fresh){state.banner=`✨ 新しい記事が${fresh}件あります`;setTimeout(()=>{state.banner='';render()},3500)}
+ }catch(e){console.error('Blog API error',e);state.banner='ブログ取得に失敗しました。しばらくしてから再読み込みしてください。'}
+ state.loading=false;render();requestAnimationFrame(()=>scrollTo(0,keep.y));
+}
 function card(p){let f=favs().has(p.member),r=reads().has(p.id);return `<article class="card ${r?'read':''} ${f?'fav':''}" style="--member:${p.memberColor||'#aaa'}" onclick="openPost('${esc(p.id)}','${esc(p.url)}')"><button class="star" onclick="event.stopPropagation();toggleFav('${esc(p.member)}')">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${esc(p.group)} · ${rel(p.date)} ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${esc(p.member)} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=(id,url)=>{let s=reads();s.add(id);saveSet('hp_reads',s);sessionStorage.setItem('hp_scroll',String(scrollY));render();location.href=url};window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
@@ -29,7 +45,7 @@ let postMembers=[...new Map(state.posts.filter(p=>p.groupId===g.id).map(p=>[p.me
 let colorByMember=new Map(postMembers.map(p=>[p.member,p.memberColor||'#aaa']));
 let roster=officialMembers[g.id]||postMembers.map(p=>p.member);
 let members=roster.map(name=>({member:name,memberColor:colorByMember.get(name)||'#aaa'}));
-let posts=state.posts.filter(p=>p.groupId===g.id&&(state.member==='all'||p.member===state.member));return `<div class="section"><button class="chip" onclick="state.group=null;render()">‹ グループ一覧</button><h2>${g.name}</h2></div><div class="chips"><button class="chip ${state.member==='all'?'on':''}" onclick="state.member='all';render()">すべて</button>${members.map(m=>`<button class="chip ${state.member===m.member?'on':''}" onclick="state.member='${esc(m.member)}';render()"><span class="dot" style="background:${m.memberColor||'#aaa'}"></span>${esc(m.member)}${favs().has(m.member)?' ✨':''}</button>`).join('')}</div><main class="section">${posts.map(card).join('')||'<div class="empty">記事がありません</div>'}</main>`}
+let posts=state.posts.filter(p=>p.groupId===g.id&&(state.member==='all'||p.member===state.member));return `<div class="section"><button class="chip" onclick="state.group=null;render()">‹ グループ一覧</button><h2>${g.name}</h2></div><div class="chips member-chips"><button class="chip ${state.member==='all'?'on':''}" onclick="state.member='all';render()">すべて</button>${members.map(m=>`<button class="chip ${state.member===m.member?'on':''}" onclick="state.member='${esc(m.member)}';render()"><span class="dot" style="background:${m.memberColor||'#aaa'}"></span>${esc(m.member)}${favs().has(m.member)?' ✨':''}</button>`).join('')}</div><main class="section">${posts.map(card).join('')||'<div class="empty">記事がありません</div>'}</main>`}
 function settings(){if(!state.settings)return '';let members=[...new Set([...Object.values(officialMembers).flat(),...state.posts.map(p=>p.member)])].sort((a,b)=>a.localeCompare(b,'ja'));return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ お気に入りメンバー</h3>${members.map(m=>`<div class="row favrow"><span>${esc(m)}</span><button onclick="toggleFav('${esc(m)}')">${favs().has(m)?'★':'☆'}</button></div>`).join('')}</div></div>`}
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
 function bottom(){return `<nav class="bottom"><button class="tab ${state.tab==='latest'?'on':''}" onclick="state.tab='latest';state.group=null;render()"><span>◷</span>最新記事</button><button class="tab ${state.tab==='groups'?'on':''}" onclick="state.tab='groups';render()"><span>▦</span>グループ別</button></nav>`}
