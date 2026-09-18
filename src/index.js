@@ -73,7 +73,7 @@ async function enrichMissingImages(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.3)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.6.0)',
             'Accept':'text/html,application/xhtml+xml'
           }
         });
@@ -88,11 +88,61 @@ async function enrichMissingImages(posts){
 }
 
 function parseRSS(xml,groupId,group){let items=xml.match(/<item\b[\s\S]*?<\/item>/gi)||[];return items.map(b=>{let title=text(tag(b,'title')),url=text(tag(b,'link')),desc=tag(b,'description')||tag(b,'content:encoded'),member=memberFrom(title,desc)||group;let d=tag(b,'pubDate');return {id:url||tag(b,'guid'),groupId,group,member,memberColor:COLORS[member]||'#A0A0A8',title:title.replace(new RegExp(`\\s*[｜|]?\\s*${member}\\s*$`),'').trim()||title,date:safeISO(d),url,image:rssImage(b,desc)}}).filter(x=>x.url&&x.date)}
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.3)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.6.0)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function parseKenshu(html){let out=[],re=/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?研修生リハーサル日記[\s\S]*?)<\/a>/gi,m;while((m=re.exec(html))){let t=text(m[2]),dm=t.match(/(20\d{2})[.\/-](\d{2})[.\/-](\d{2})\s+(.+)$/);if(!dm)continue;let url=new URL(m[1],'https://www.upfc.jp').href,member=dm[4].trim();out.push({id:url,groupId:'kenshusei',group:'ハロプロ研修生',member,memberColor:'#A0A0A8',title:'Hello! Project 研修生リハーサル日記',date:`${dm[1]}-${dm[2]}-${dm[3]}T12:00:00+09:00`,url,image:''})}return out}
-async function getPosts(){let settled=await Promise.allSettled(BLOGS.map(fetchBlog));let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);let sources=settled.map((x,i)=>({source:BLOGS[i][2],ok:x.status==='fulfilled',count:x.status==='fulfilled'?x.value.posts.length:0,error:x.status==='rejected'?String(x.reason?.message||x.reason):''}));try{let r=await fetch('https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI',{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok)posts.push(...parseKenshu(await r.text()))}catch(e){}
- let cutoff=Date.now()-30*864e5,seen=new Set();posts=posts.filter(p=>new Date(p.date).getTime()>=cutoff).sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(p=>!seen.has(p.id)&&seen.add(p.id));await enrichMissingImages(posts);return {posts,sources};}
-async function handler(req){if(req.method==='OPTIONS')return new Response(null,{headers:cors()});let {posts,sources}=await getPosts();return new Response(JSON.stringify({posts,sources,updatedAt:new Date().toISOString(),source:'official-ameba-rss-and-kenshusei'}),{headers:{...cors(),'content-type':'application/json;charset=utf-8','cache-control':'public,max-age=300'}})}
+
+async function getPostIndex(){
+  const settled=await Promise.allSettled(BLOGS.map(fetchBlog));
+  let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);
+  const sources=settled.map((x,i)=>({
+    source:BLOGS[i][2],ok:x.status==='fulfilled',
+    count:x.status==='fulfilled'?x.value.posts.length:0,
+    error:x.status==='rejected'?String(x.reason?.message||x.reason):''
+  }));
+  try{
+    const r=await fetch('https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI',{headers:{'User-Agent':'Mozilla/5.0'}});
+    if(r.ok) posts.push(...parseKenshu(await r.text()));
+  }catch(_){}
+  const cutoff=Date.now()-30*864e5,seen=new Set();
+  posts=posts
+    .filter(p=>new Date(p.date).getTime()>=cutoff)
+    .sort((a,b)=>new Date(b.date)-new Date(a.date))
+    .filter(p=>!seen.has(p.id)&&seen.add(p.id));
+  return {posts,sources};
+}
+
+async function handler(req){
+  if(req.method==='OPTIONS') return new Response(null,{headers:cors()});
+  const u=new URL(req.url);
+  const offset=Math.max(0,Number.parseInt(u.searchParams.get('offset')||'0',10)||0);
+  const limit=Math.min(20,Math.max(1,Number.parseInt(u.searchParams.get('limit')||'20',10)||20));
+  const group=u.searchParams.get('group')||'';
+  const member=u.searchParams.get('member')||'';
+
+  const {posts:allPosts,sources}=await getPostIndex();
+
+  // Counts are computed from the complete 30-day metadata index, not just this page.
+  const groupCounts={};
+  for(const p of allPosts) groupCounts[p.groupId]=(groupCounts[p.groupId]||0)+1;
+
+  let filtered=allPosts;
+  if(group) filtered=filtered.filter(p=>p.groupId===group);
+  if(member) filtered=filtered.filter(p=>p.member===member);
+
+  const total=filtered.length;
+  const page=filtered.slice(offset,offset+limit);
+
+  // Critical structural change: only articles returned on THIS page are enriched.
+  // RSS/Kenshusei index requests (~15) + at most 20 article requests stay below
+  // the Workers Free external-subrequest ceiling.
+  await enrichMissingImages(page);
+
+  return new Response(JSON.stringify({
+    posts:page,total,offset,limit,hasMore:offset+page.length<total,
+    groupCounts,sources,updatedAt:new Date().toISOString(),
+    source:'official-ameba-rss-and-kenshusei'
+  }),{headers:{...cors(),'content-type':'application/json;charset=utf-8','cache-control':'no-store'}});
+}
 function cors(){return {'access-control-allow-origin':'*','access-control-allow-methods':'GET,OPTIONS'}}
 export default {
   async fetch(request, env) {
