@@ -17,7 +17,9 @@ const officialMembers={
  ocha:['斉藤円香','広本瑠璃','米村姫良々','窪田七海','中山夏月姫','西﨑美空','北原もも','筒井澪心'],
  rosy:['橋田歩果','吉田姫杷','小野田華凜','村越彩菜','植村葉純','松原ユリヤ','島川波菜','上村麗菜','相馬優芽']
 };
-let state={tab:'latest',group:null,member:'all',posts:[],visible:20,loading:false,banner:'',settings:false};
+const savedNav=(()=>{try{return JSON.parse(sessionStorage.getItem('hp_nav')||'{}')}catch{return {}}})();
+let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],visible:20,loading:false,banner:'',settings:false};
+function saveNav(){sessionStorage.setItem('hp_nav',JSON.stringify({tab:state.tab,group:state.group,member:state.member}))}
 const favs=()=>new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]')); const reads=()=>new Set(JSON.parse(localStorage.getItem('hp_reads')||'[]'));
 const saveSet=(k,s)=>localStorage.setItem(k,JSON.stringify([...s]));
 function isNew(p){return !reads().has(p.id) && Date.now()-new Date(p.date).getTime()<48*3600e3}
@@ -49,7 +51,7 @@ let posts=state.posts.filter(p=>p.groupId===g.id&&(state.member==='all'||p.membe
 function settings(){if(!state.settings)return '';let members=[...new Set([...Object.values(officialMembers).flat(),...state.posts.map(p=>p.member)])].sort((a,b)=>a.localeCompare(b,'ja'));return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ お気に入りメンバー</h3>${members.map(m=>`<div class="row favrow"><span>${esc(m)}</span><button onclick="toggleFav('${esc(m)}')">${favs().has(m)?'★':'☆'}</button></div>`).join('')}</div></div>`}
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
 function bottom(){return `<nav class="bottom"><button class="tab ${state.tab==='latest'?'on':''}" onclick="state.tab='latest';state.group=null;render()"><span>◷</span>最新記事</button><button class="tab ${state.tab==='groups'?'on':''}" onclick="state.tab='groups';render()"><span>▦</span>グループ別</button></nav>`}
-function render(){document.getElementById('app').innerHTML=`<div class="shell">${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`}
+function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell">${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`}
 let sy=0;addEventListener('touchstart',e=>{if(scrollY===0)sy=e.touches[0].clientY},{passive:true});addEventListener('touchend',e=>{if(sy&&e.changedTouches[0].clientY-sy>90)load(true);sy=0},{passive:true});
 render();load(true);if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');
 

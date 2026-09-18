@@ -39,19 +39,26 @@ function normalizeImage(url=''){
     .replace(/^http:/i,'https:')
     .trim();
 }
+function isUsefulArticleImage(u=''){
+  if(!/^https?:\/\//i.test(u)) return false;
+  return !/(profile|avatar|logo|emoji|stamp|skin|common|favicon|blank|spacer|pixel|banner)/i.test(u);
+}
 function articleImageFromHTML(html=''){
+  const unescaped=html.replace(/\\u002F/gi,'/').replace(/\\\//g,'/').replace(/&quot;/g,'"');
   const candidates = [
     /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
     /<meta[^>]+name=["']twitter:image(?::src)?["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image(?::src)?["']/i,
-    /<img[^>]+(?:data-src|data-original|data-lazy-src|data-image|src)=["']([^"']+)["']/i
+    /(?:articleText|entry-text|article__text|js-entry-text)[\s\S]{0,12000}?<(?:img|amp-img)[^>]+(?:data-src|data-original|data-lazy-src|data-image|src)=["']([^"']+)["']/i,
+    /"(?:imageUrl|image_url|imageSrc|image_src)"\s*:\s*"(https?:[^"]+)"/i,
+    /<(?:img|amp-img)[^>]+(?:data-src|data-original|data-lazy-src|data-image|src)=["']([^"']+)["']/i
   ];
-  for (const re of candidates) {
-    const m = html.match(re);
-    if (m && m[1]) {
-      const u = normalizeImage(m[1]);
-      if (/^https?:\/\//i.test(u)) return u;
+  for(const rx of candidates){
+    const m=unescaped.match(rx);
+    if(m&&m[1]){
+      const u=normalizeImage(m[1]);
+      if(isUsefulArticleImage(u)) return u;
     }
   }
   return '';
@@ -66,7 +73,7 @@ async function enrichMissingImages(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.2)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.3)',
             'Accept':'text/html,application/xhtml+xml'
           }
         });
@@ -81,7 +88,7 @@ async function enrichMissingImages(posts){
 }
 
 function parseRSS(xml,groupId,group){let items=xml.match(/<item\b[\s\S]*?<\/item>/gi)||[];return items.map(b=>{let title=text(tag(b,'title')),url=text(tag(b,'link')),desc=tag(b,'description')||tag(b,'content:encoded'),member=memberFrom(title,desc)||group;let d=tag(b,'pubDate');return {id:url||tag(b,'guid'),groupId,group,member,memberColor:COLORS[member]||'#A0A0A8',title:title.replace(new RegExp(`\\s*[｜|]?\\s*${member}\\s*$`),'').trim()||title,date:safeISO(d),url,image:rssImage(b,desc)}}).filter(x=>x.url&&x.date)}
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.2)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.5.3)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function parseKenshu(html){let out=[],re=/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?研修生リハーサル日記[\s\S]*?)<\/a>/gi,m;while((m=re.exec(html))){let t=text(m[2]),dm=t.match(/(20\d{2})[.\/-](\d{2})[.\/-](\d{2})\s+(.+)$/);if(!dm)continue;let url=new URL(m[1],'https://www.upfc.jp').href,member=dm[4].trim();out.push({id:url,groupId:'kenshusei',group:'ハロプロ研修生',member,memberColor:'#A0A0A8',title:'Hello! Project 研修生リハーサル日記',date:`${dm[1]}-${dm[2]}-${dm[3]}T12:00:00+09:00`,url,image:''})}return out}
 async function getPosts(){let settled=await Promise.allSettled(BLOGS.map(fetchBlog));let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);let sources=settled.map((x,i)=>({source:BLOGS[i][2],ok:x.status==='fulfilled',count:x.status==='fulfilled'?x.value.posts.length:0,error:x.status==='rejected'?String(x.reason?.message||x.reason):''}));try{let r=await fetch('https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI',{headers:{'User-Agent':'Mozilla/5.0'}});if(r.ok)posts.push(...parseKenshu(await r.text()))}catch(e){}
  let cutoff=Date.now()-30*864e5,seen=new Set();posts=posts.filter(p=>new Date(p.date).getTime()>=cutoff).sort((a,b)=>new Date(b.date)-new Date(a.date)).filter(p=>!seen.has(p.id)&&seen.add(p.id));await enrichMissingImages(posts);return {posts,sources};}
