@@ -1,3 +1,4 @@
+try{localStorage.removeItem('hp_posts_cache');localStorage.removeItem('hp_posts_cache_v07');}catch(_){}
 const mobileFix=document.createElement('style');mobileFix.textContent=`
 .member-chips{display:flex!important;flex-wrap:wrap!important;overflow:visible!important;white-space:normal!important;gap:8px!important;padding-bottom:8px}
 .member-chips .chip{flex:0 0 auto;margin:0!important}
@@ -103,6 +104,13 @@ window.loadMore=()=>{if(!state.loadingMore&&state.hasMore)load(false,true)};
 window.openGroup=id=>{state.tab='groups';state.group=id;state.member='all';state.posts=[];saveNav();load(true,false)};
 window.selectMember=m=>{state.member=m;state.posts=[];saveNav();load(true,false)};
 window.backGroups=()=>{state.group=null;state.member='all';state.posts=[];saveNav();render()};
+function openPost(id){
+  const p=state.posts.find(x=>x.id===id);
+  if(!p||!p.url)return;
+  readSet.add(id);saveSet('read',readSet);
+  // Resolve at tap time from the latest API-backed state, not a URL embedded in stale markup.
+  location.href=p.url;
+}
 function card(p){let f=favs().has(p.member),r=reads().has(p.id);return `<article class="card ${r?'read':''} ${f?'fav':''}" style="--member:${p.memberColor||'#aaa'}" onclick="openPost('${esc(p.id)}','${esc(p.url)}')"><button class="star" onclick="event.stopPropagation();toggleFav('${esc(p.member)}')">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${esc(p.group)} · ${rel(p.date)} ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${esc(p.member)} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=(id,url)=>{let s=reads();s.add(id);saveSet('hp_reads',s);sessionStorage.setItem('hp_scroll',String(scrollY));render();location.href=url};window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
