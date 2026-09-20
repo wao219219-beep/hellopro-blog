@@ -40,13 +40,16 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .group-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:var(--group-bg);border:1px solid color-mix(in srgb,var(--group-color) 26%,transparent);font-weight:650;color:var(--text,#222);line-height:1.35}
 .meta-time{white-space:nowrap}
 .card.fav{outline-color:var(--fav-outline,var(--member,#f3bd24))!important}
+/* v0.8.5: group tiles use the same centralized group color master as article badges. */
+.tile{border-top-color:var(--group)!important}
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
+// Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
 const groups=[
- {id:'morningmusume',name:"モーニング娘。'26",color:'#E5457D'}, {id:'angerme',name:'アンジュルム',color:'#FF85AD'},
- {id:'juicejuice',name:'Juice=Juice',color:'#FF9900'}, {id:'tsubaki',name:'つばきファクトリー',color:'#787FDC'},
- {id:'beyooooonds',name:'BEYOOOOONDS',color:'#BA3CB8'}, {id:'ocha',name:'OCHA NORMA',color:'#41B06C'},
- {id:'rosy',name:'ロージークロニクル',color:'#BF3B3B'}, {id:'kenshusei',name:'ハロプロ研修生',color:'#33D6AD'}];
+ {id:'morningmusume',name:"モーニング娘。'26",color:'#D92C1B'}, {id:'angerme',name:'アンジュルム',color:'#1D91CD'},
+ {id:'juicejuice',name:'Juice=Juice',color:'#7263AA'}, {id:'tsubaki',name:'つばきファクトリー',color:'#EF93BB'},
+ {id:'beyooooonds',name:'BEYOOOOONDS',color:'#20A239'}, {id:'ocha',name:'OCHA NORMA',color:'#F1881A'},
+ {id:'rosy',name:'ロージークロニクル',color:'#F5D11F'}, {id:'kenshusei',name:'ハロプロ研修生',color:'#92C75B'}];
 const groupByName=name=>groups.find(g=>g.name===name);
 function hexToRgba(hex,a=.13){const h=String(hex||'').replace('#','');if(!/^[0-9a-f]{6}$/i.test(h))return `rgba(128,128,128,${a})`;const n=parseInt(h,16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`}
 function groupBadge(name){const g=groupByName(name);const c=g?.color||'#7d7d86';return `<span class="group-badge" style="--group-color:${c};--group-bg:${hexToRgba(c,.14)}">${esc(name)}</span>`}
