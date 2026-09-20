@@ -16,7 +16,7 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .brand{position:relative;z-index:2;text-align:center!important;display:flex!important;flex-direction:column!important;gap:7px!important;align-items:center!important;font-size:25px!important;line-height:1.05;white-space:nowrap}
 .brand .dots{order:2}.brand .dots i{width:8px!important;height:8px!important}
 .top .iconbtn{position:absolute!important;right:10px!important;top:10px!important;z-index:4}
-.card.fav{outline:2px solid #f3bd24!important;outline-offset:-2px;box-shadow:0 8px 22px rgba(229,171,0,.16)!important}
+.card.fav{outline:2px solid var(--fav-outline,var(--member,#f3bd24))!important;outline-offset:-2px;box-shadow:0 8px 22px rgba(0,0,0,.10)!important}
 .card.fav .star{color:#e9ad00!important}
 @media(max-width:430px){
  .top{height:112px!important;min-height:112px!important;padding:10px 70px 6px!important}
@@ -36,13 +36,20 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .ptr-spinner{width:14px;height:14px;border:2px solid rgba(120,120,128,.24);border-top-color:#777;border-radius:50%;box-sizing:border-box}
 .ptr.refreshing .ptr-spinner{animation:ptrSpin .7s linear infinite}
 @keyframes ptrSpin{to{transform:rotate(360deg)}}
+/* v0.8.3 group badge + member-color favorite outline */
+.group-badge{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:var(--group-bg);border:1px solid color-mix(in srgb,var(--group-color) 26%,transparent);font-weight:650;color:var(--text,#222);line-height:1.35}
+.meta-time{white-space:nowrap}
+.card.fav{outline-color:var(--fav-outline,var(--member,#f3bd24))!important}
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
 const groups=[
- {id:'morningmusume',name:"モーニング娘。'26",color:'#e84d8a'}, {id:'angerme',name:'アンジュルム',color:'#f05a66'},
- {id:'juicejuice',name:'Juice=Juice',color:'#8b5fbf'}, {id:'tsubaki',name:'つばきファクトリー',color:'#75b7df'},
- {id:'beyooooonds',name:'BEYOOOOONDS',color:'#f3b33d'}, {id:'ocha',name:'OCHA NORMA',color:'#65b86e'},
- {id:'rosy',name:'ロージークロニクル',color:'#e85b8c'}, {id:'kenshusei',name:'ハロプロ研修生',color:'#7d7d86'}];
+ {id:'morningmusume',name:"モーニング娘。'26",color:'#E5457D'}, {id:'angerme',name:'アンジュルム',color:'#FF85AD'},
+ {id:'juicejuice',name:'Juice=Juice',color:'#FF9900'}, {id:'tsubaki',name:'つばきファクトリー',color:'#787FDC'},
+ {id:'beyooooonds',name:'BEYOOOOONDS',color:'#BA3CB8'}, {id:'ocha',name:'OCHA NORMA',color:'#41B06C'},
+ {id:'rosy',name:'ロージークロニクル',color:'#BF3B3B'}, {id:'kenshusei',name:'ハロプロ研修生',color:'#33D6AD'}];
+const groupByName=name=>groups.find(g=>g.name===name);
+function hexToRgba(hex,a=.13){const h=String(hex||'').replace('#','');if(!/^[0-9a-f]{6}$/i.test(h))return `rgba(128,128,128,${a})`;const n=parseInt(h,16);return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`}
+function groupBadge(name){const g=groupByName(name);const c=g?.color||'#7d7d86';return `<span class="group-badge" style="--group-color:${c};--group-bg:${hexToRgba(c,.14)}">${esc(name)}</span>`}
 const savedNav=(()=>{try{return JSON.parse(sessionStorage.getItem('hp_nav')||'{}')}catch{return {}}})();
 let pull={startY:0,distance:0,tracking:false,refreshing:false};
 let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],loading:false,loadingMore:false,hasMore:false,total:0,banner:'',settings:false,groupCounts:{},memberMaster:{updated:'',groups:[]}};
@@ -120,7 +127,7 @@ function openPost(id){
   location.href=p.url;
 }
 function colorDot(hex){const h=hex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(h);return `<span class="author-dot${white?' white':''}" style="background:${h}"></span>`}
-function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),color=p.memberColorHex||'#A0A0A8';return `<article class="card ${r?'read':''} ${f?'fav':''}" style="--member:${color}" onclick="openPost('${esc(p.id)}')"><button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${esc(p.group)} · ${rel(p.publishedAt)} ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
+function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),color=p.memberColorHex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(color);const favOutline=white?'#B8BCC4':color;return `<article class="card ${r?'read':''} ${f?'fav':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')"><button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=openPost;window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
 function topBar(){return `<header class="top"><img class="hp-idols left desktop" src="./assets/idols-left.png" alt=""><img class="hp-idols left mobile" src="./assets/idols-left-mobile.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right desktop" src="./assets/idols-right.png" alt=""><img class="hp-idols right mobile" src="./assets/idols-right-mobile.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
