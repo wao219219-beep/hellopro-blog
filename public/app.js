@@ -42,6 +42,19 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .card.fav{outline-color:var(--fav-outline,var(--member,#f3bd24))!important}
 /* v0.8.5: group tiles use the same centralized group color master as article badges. */
 .tile{border-top-color:var(--group)!important}
+
+/* v0.8.6 grouped favorite settings */
+.fav-groups{display:flex;flex-direction:column;gap:12px;margin-top:10px}
+.fav-group{border:1px solid rgba(120,120,128,.13);border-left:4px solid var(--group-color);border-radius:16px;padding:12px;background:var(--group-bg)}
+.fav-group-title{display:flex;align-items:center;gap:8px;font-weight:800;font-size:15px;margin:0 0 10px}
+.fav-group-title .group-mini-dot{width:9px;height:9px;border-radius:50%;background:var(--group-color);flex:none}
+.fav-member-list{display:flex;flex-wrap:wrap;gap:8px}
+.fav-member-chip{appearance:none;border:1px solid rgba(120,120,128,.22);background:var(--card,#fff);color:var(--text,#222);border-radius:999px;padding:8px 11px;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:14px;line-height:1;box-shadow:none}
+.fav-member-chip.on{border-color:var(--member-color);background:var(--member-bg);font-weight:750;box-shadow:inset 0 0 0 1px var(--member-color)}
+.fav-member-chip .member-dot{width:9px;height:9px;border-radius:50%;background:var(--member-color);flex:none;box-sizing:border-box}
+.fav-member-chip .member-dot.white{border:1px solid #aaa}
+.fav-member-chip .fav-mark{font-size:12px}
+
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
 // Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
@@ -146,13 +159,29 @@ function groupView(){
  }
  const g=groups.find(x=>x.id===state.group);
  const gm=(state.memberMaster.groups||[]).find(x=>x.id===g.id);
- const members=gm?gm.members.map(m=>({member:m.name,memberColorHex:m.hex,memberColor:m.color})):[];
+ const members=gm?[...gm.members].sort((a,b)=>(a.order??999)-(b.order??999)).map(m=>({member:m.name,memberColorHex:m.hex,memberColor:m.color})):[];
  const body=state.loading&&!state.posts.length?loadingMain():(state.posts.map(card).join('')+moreButton()||'<div class="empty">記事がありません</div>');
  return `<div class="section"><button class="chip" onclick="backGroups()">‹ グループ一覧</button><h2>${g.name}</h2></div>
  <div class="chips member-chips"><button class="chip ${state.member==='all'?'on':''}" onclick="selectMember('all')">すべて</button>${members.map(m=>`<button class="chip ${state.member===m.member?'on':''}" onclick="selectMember('${esc(m.member)}')"><span class="dot" style="background:${m.memberColorHex||'#aaa'}"></span>${esc(m.member)}${favs().has(m.member)?' ✨':''}</button>`).join('')}</div>
  <main class="section">${body}</main>`;
 }
-function settings(){if(!state.settings)return '';let members=[...new Set([...(state.memberMaster.groups||[]).flatMap(g=>g.members.map(m=>m.name)),...state.posts.map(p=>p.author).filter(Boolean)])].sort((a,b)=>a.localeCompare(b,'ja'));return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ お気に入りメンバー</h3>${members.map(m=>`<div class="row favrow"><span>${esc(m)}</span><button onclick="toggleFav('${esc(m)}')">${favs().has(m)?'★':'☆'}</button></div>`).join('')}</div></div>`}
+function settings(){
+ if(!state.settings)return '';
+ const masterGroups=(state.memberMaster.groups||[]);
+ const sections=groups.map(g=>{
+   const gm=masterGroups.find(x=>x.id===g.id);
+   if(!gm||!gm.members?.length)return '';
+   const members=[...gm.members].sort((a,b)=>(a.order??999)-(b.order??999));
+   return `<section class="fav-group" style="--group-color:${g.color};--group-bg:${hexToRgba(g.color,.075)}">
+     <div class="fav-group-title"><span class="group-mini-dot"></span>${esc(g.name)}</div>
+     <div class="fav-member-list">${members.map(m=>{
+       const on=favs().has(m.name), c=m.hex||'#aaa', white=String(c).toUpperCase()==='#FFFFFF';
+       return `<button class="fav-member-chip ${on?'on':''}" style="--member-color:${white?'#B8B8BE':c};--member-bg:${hexToRgba(white?'#B8B8BE':c,.10)}" onclick="toggleFav('${esc(m.name)}')"><span class="member-dot ${white?'white':''}" style="--member-color:${c}"></span><span>${esc(m.name)}</span>${on?'<span class="fav-mark">★</span>':''}</button>`;
+     }).join('')}</div>
+   </section>`;
+ }).join('');
+ return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ お気に入りメンバー</h3><div class="fav-groups">${sections}</div></div></div>`;
+}
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
 window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
 window.goGroups=()=>{state.tab='groups';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
