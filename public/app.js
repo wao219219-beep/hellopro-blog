@@ -30,6 +30,12 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .author-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;vertical-align:1px;box-shadow:0 0 0 1px rgba(0,0,0,.06)}
 .author-dot.white{border:1px solid #aaa;box-sizing:border-box}
 .unknown-author{color:#999;font-weight:600}
+/* v0.8.2 X-like pull-to-refresh */
+.ptr{position:fixed;left:50%;top:126px;z-index:20;width:28px;height:28px;margin-left:-14px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--card,#fff);box-shadow:0 2px 10px rgba(0,0,0,.10);opacity:0;transform:translateY(-18px) scale(.78);pointer-events:none;transition:opacity .12s ease,transform .12s ease}
+.ptr.show{opacity:1}.ptr.refreshing{opacity:1;transform:translateY(0) scale(1)}
+.ptr-spinner{width:14px;height:14px;border:2px solid rgba(120,120,128,.24);border-top-color:#777;border-radius:50%;box-sizing:border-box}
+.ptr.refreshing .ptr-spinner{animation:ptrSpin .7s linear infinite}
+@keyframes ptrSpin{to{transform:rotate(360deg)}}
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
 const groups=[
@@ -38,6 +44,7 @@ const groups=[
  {id:'beyooooonds',name:'BEYOOOOONDS',color:'#f3b33d'}, {id:'ocha',name:'OCHA NORMA',color:'#65b86e'},
  {id:'rosy',name:'ロージークロニクル',color:'#e85b8c'}, {id:'kenshusei',name:'ハロプロ研修生',color:'#7d7d86'}];
 const savedNav=(()=>{try{return JSON.parse(sessionStorage.getItem('hp_nav')||'{}')}catch{return {}}})();
+let pull={startY:0,distance:0,tracking:false,refreshing:false};
 let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],loading:false,loadingMore:false,hasMore:false,total:0,banner:'',settings:false,groupCounts:{},memberMaster:{updated:'',groups:[]}};
 function saveNav(){sessionStorage.setItem('hp_nav',JSON.stringify({tab:state.tab,group:state.group,member:state.member}))}
 const favs=()=>new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]')); const reads=()=>new Set(JSON.parse(localStorage.getItem('hp_reads')||'[]'));
@@ -53,7 +60,7 @@ async function prefetchNext(){
  if(!state.hasMore||state.loading||state.loadingMore)return;
  const offset=state.posts.length,key=queryFor(offset,false);
  if(prefetched&&prefetched.key===key)return;
- try{const r=await fetch(key,{cache:'no-store'});if(r.ok)prefetched={key,data:await r.json()}}catch(_){}
+ try{const r=await fetch(key,{cache:'default'});if(r.ok)prefetched={key,data:await r.json()}}catch(_){}
 }
 
 function queryFor(offset=0,bust=true){
@@ -65,6 +72,7 @@ function queryFor(offset=0,bust=true){
 }
 async function load(show=true,append=false,manual=false){
  const refreshStarted=Date.now();
+ if(manual) pull.refreshing=true;
  const keep={tab:state.tab,group:state.group,member:state.member,y:scrollY};
  // Instant paint from the previous successful page while fresh data loads behind it.
  if(!append&&!state.posts.length) restorePageCache();
@@ -77,7 +85,7 @@ async function load(show=true,append=false,manual=false){
   let j;
   if(append&&prefetched&&prefetched.key===stableKey){j=prefetched.data;prefetched=null}
   else{
-   const r=await fetch(queryFor(offset,true),{cache:'no-store'});
+   const r=await fetch(queryFor(offset,manual),{cache:'default'});
    if(!r.ok) throw new Error(`HTTP ${r.status}`);
    j=await r.json();
   }
@@ -93,6 +101,7 @@ async function load(show=true,append=false,manual=false){
   console.error('Blog API error',e);
   if(!state.posts.length) state.banner='ブログ取得に失敗しました。しばらくしてから再読み込みしてください。';
  }
+ if(manual){const wait=Math.max(0,650-(Date.now()-refreshStarted));if(wait)await new Promise(r=>setTimeout(r,wait));pull.refreshing=false;pull.distance=0;}
  state.loading=false;state.loadingMore=false;render();
  if(!append) requestAnimationFrame(()=>scrollTo(0,keep.y));
  setTimeout(prefetchNext,500);
@@ -138,8 +147,12 @@ window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.
 window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
 window.goGroups=()=>{state.tab='groups';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
 function bottom(){return `<nav class="bottom"><button class="tab ${state.tab==='latest'?'on':''}" onclick="goLatest()"><span>◷</span>最新記事</button><button class="tab ${state.tab==='groups'?'on':''}" onclick="goGroups()"><span>▦</span>グループ別</button></nav>`}
-function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell">${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`}
-let sy=0;addEventListener('touchstart',e=>{if(scrollY===0)sy=e.touches[0].clientY},{passive:true});addEventListener('touchend',e=>{if(sy&&e.changedTouches[0].clientY-sy>90)load(true,false,true);sy=0},{passive:true});
+function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`}
+function updatePtr(){const el=document.getElementById('ptr');if(!el)return;if(pull.refreshing){el.className='ptr show refreshing';el.style.transform='translateY(0) scale(1)';return}const d=Math.min(110,pull.distance);const progress=Math.min(1,d/78);el.className='ptr'+(d>4?' show':'');el.style.opacity=String(progress);el.style.transform=`translateY(${Math.max(-18,-18+d*.42)}px) scale(${.78+.22*progress})`;const sp=el.querySelector('.ptr-spinner');if(sp)sp.style.transform=`rotate(${progress*250}deg)`}
+addEventListener('touchstart',e=>{if(scrollY<=0&&!pull.refreshing){pull.startY=e.touches[0].clientY;pull.distance=0;pull.tracking=true}},{passive:true});
+addEventListener('touchmove',e=>{if(!pull.tracking||pull.refreshing)return;const dy=e.touches[0].clientY-pull.startY;if(dy<=0){pull.distance=0;updatePtr();return}pull.distance=Math.min(110,dy*.62);updatePtr();if(pull.distance>8)e.preventDefault()},{passive:false});
+addEventListener('touchend',()=>{if(!pull.tracking)return;const trigger=pull.distance>=72;pull.tracking=false;if(trigger){pull.refreshing=true;updatePtr();load(false,false,true)}else{pull.distance=0;updatePtr()}},{passive:true});
+addEventListener('touchcancel',()=>{pull.tracking=false;pull.distance=0;updatePtr()},{passive:true});
 render();load(true);if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');
 
 addEventListener('pageshow',()=>{let y=Number(sessionStorage.getItem('hp_scroll')||0);if(y)setTimeout(()=>scrollTo(0,y),60)});

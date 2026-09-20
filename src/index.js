@@ -103,7 +103,7 @@ async function enrichPageDetails(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.0)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)',
             'Accept':'text/html,application/xhtml+xml'
           },
           // Article pages rarely change after publication. Reuse Cloudflare's
@@ -142,7 +142,7 @@ function parseRSS(xml,groupId,group){
     return post;
   }).filter(x=>x.url&&x.publishedAt)
 }
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.0)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function canonicalKenshuDetail(raw=''){
   try{
     const u=new URL(decode(raw),'https://www.upfc.jp');
@@ -197,7 +197,7 @@ async function getPostIndex(){
     const listUrl='https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI';
     const r=await fetch(listUrl,{
       headers:{
-        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.0)',
+        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)',
         'Accept':'text/html,application/xhtml+xml'
       },
       cf:{cacheEverything:true,cacheTtl:90}
@@ -256,11 +256,53 @@ async function handler(req){
   }),{headers:{...cors(),'content-type':'application/json;charset=utf-8','cache-control':'no-store'}});
 }
 function cors(){return {'access-control-allow-origin':'*','access-control-allow-methods':'GET,OPTIONS'}}
+
+// v0.8.2: API-level cache + stale fallback. This prevents repeated iPhone reloads
+// from fanning out into many RSS/article requests at once.
+const API_INFLIGHT = new Map();
+function apiCacheRequest(request, tier='fresh'){
+  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_cache',tier);
+  return new Request(u.toString(),{method:'GET'});
+}
+async function cachedApi(request){
+  const cache=caches.default;
+  const freshKey=apiCacheRequest(request,'fresh');
+  const staleKey=apiCacheRequest(request,'stale');
+  const fresh=await cache.match(freshKey);
+  if(fresh)return fresh;
+
+  const stable=new URL(request.url);stable.searchParams.delete('_');
+  const lockKey=stable.toString();
+  if(API_INFLIGHT.has(lockKey)) return (await API_INFLIGHT.get(lockKey)).clone();
+
+  const job=(async()=>{
+    try{
+      const response=await handler(request);
+      if(!response.ok)throw new Error(`HTTP ${response.status}`);
+      const freshCopy=new Response(response.clone().body,{status:response.status,headers:response.headers});
+      freshCopy.headers.set('cache-control','public, max-age=30');
+      const staleCopy=new Response(response.clone().body,{status:response.status,headers:response.headers});
+      staleCopy.headers.set('cache-control','public, max-age=21600');
+      await Promise.all([cache.put(freshKey,freshCopy),cache.put(staleKey,staleCopy)]);
+      return response;
+    }catch(error){
+      const stale=await cache.match(staleKey);
+      if(stale){
+        const h=new Headers(stale.headers);h.set('x-hp-stale','1');
+        return new Response(stale.body,{status:200,headers:h});
+      }
+      throw error;
+    }
+  })();
+  API_INFLIGHT.set(lockKey,job);
+  try{return (await job).clone()}finally{API_INFLIGHT.delete(lockKey)}
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/api/posts') {
-      try { return await handler(request); }
+      try { return await cachedApi(request); }
       catch (error) {
         return new Response(JSON.stringify({ posts: [], error: 'feed_fetch_failed', detail: String(error?.message || error) }), {
           status: 502,
