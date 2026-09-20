@@ -104,7 +104,9 @@ window.backGroups=()=>{state.group=null;state.member='all';state.posts=[];saveNa
 function openPost(id){
   const p=state.posts.find(x=>x.id===id);
   if(!p||!p.url)return;
-  readSet.add(id);saveSet('read',readSet);
+  const readSet=reads();
+  readSet.add(id);
+  saveSet('hp_reads',readSet);
   // Resolve at tap time from the latest API-backed state, not a URL embedded in stale markup.
   location.href=p.url;
 }
