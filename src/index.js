@@ -70,23 +70,30 @@ function articleImageFromHTML(html=''){
   }
   return '';
 }
-function articleAuthorFromHTML(html='',groupId=''){
-  const unescaped=html.replace(/\\u002F/gi,'/').replace(/\\\//g,'/').replace(/&quot;/g,'"');
-  const fields=[];
-  const patterns=[
-    /"author"\s*:\s*\{[\s\S]{0,1000}?"name"\s*:\s*"([^"]+)"/ig,
-    /"authorName"\s*:\s*"([^"]+)"/ig,
-    /"nickname"\s*:\s*"([^"]+)"/ig,
-    /<meta[^>]+(?:name|property)=["'](?:author|article:author)["'][^>]+content=["']([^"']+)["']/ig,
-    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["'](?:author|article:author)["']/ig
-  ];
-  for(const rx of patterns){let m;while((m=rx.exec(unescaped)))fields.push(m[1])}
-  for(const raw of fields){const exact=memberRecord(groupId,raw);if(exact)return exact}
-  // Some Ameba pages decorate the author field. Accept only when exactly one
-  // member of this group occurs in author-specific metadata, never article body.
-  const hits=[];
-  for(const raw of fields)for(const m of candidatesInText(groupId,raw))if(!hits.some(x=>x.name===m.name))hits.push(m);
-  return hits.length===1?hits[0]:null;
+function articleThemeMemberFromHTML(html='',groupId=''){
+  // Hello! Project's shared Ameba blogs use the article "テーマ" field as the
+  // posting member. For Ameba this is the only authoritative author source.
+  const source=html.replace(/\\u002F/gi,'/').replace(/\\\//g,'/').replace(/&quot;/g,'"');
+  const windows=[];
+  const marker=/テーマ\s*[：:]/g;
+  let hit;
+  while((hit=marker.exec(source))) windows.push(source.slice(hit.index,hit.index+700));
+
+  for(const chunk of windows){
+    // Prefer linked theme text, which is how Ameba normally renders the field.
+    const a=chunk.match(/テーマ\s*[：:][\s\S]{0,260}?<a\b[^>]*>([\s\S]{1,120}?)<\/a>/i);
+    if(a){
+      const member=memberRecord(groupId,text(a[1]));
+      if(member)return member;
+    }
+    // Fallback only for alternate HTML rendering of the SAME theme field.
+    // This is not an author/title/body inference.
+    const plain=text(chunk).replace(/^.*?テーマ\s*[：:]\s*/,'');
+    for(const member of membersForGroup(groupId)){
+      if(normalizeName(plain).startsWith(normalizeName(member.name))) return member;
+    }
+  }
+  return null;
 }
 function applyMember(post,member){
   if(!member){post.author=null;post.memberColor=null;post.memberColorHex=null;return}
@@ -103,7 +110,7 @@ async function enrichPageDetails(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)',
             'Accept':'text/html,application/xhtml+xml'
           },
           // Article pages rarely change after publication. Reuse Cloudflare's
@@ -113,8 +120,8 @@ async function enrichPageDetails(posts){
         if (!r.ok) continue;
         const html=await r.text();
         if(/^https:\/\/ameblo\.jp\//i.test(p.url)){
-          const pageAuthor=articleAuthorFromHTML(html,p.groupId);
-          if(pageAuthor) applyMember(p,pageAuthor);
+          const themeMember=articleThemeMemberFromHTML(html,p.groupId);
+          applyMember(p,themeMember);
         }
         let img='';
         if(!p.image && p.groupId==='kenshusei'){
@@ -134,15 +141,13 @@ function parseRSS(xml,groupId,group){
   const items=xml.match(/<item\b[\s\S]*?<\/item>/gi)||[];
   return items.map(b=>{
     const rawTitle=text(tag(b,'title')),url=text(tag(b,'link')),desc=tag(b,'description')||tag(b,'content:encoded');
-    const candidate=rssAuthorCandidate(groupId,rawTitle,desc);
+    const routeHint=rssAuthorCandidate(groupId,rawTitle,desc);
     const d=tag(b,'pubDate');
-    const post={id:url||tag(b,'guid'),groupId,group,author:null,memberColor:null,memberColorHex:null,title:rawTitle,publishedAt:safeISO(d),url,image:rssImage(b,desc)};
-    applyMember(post,candidate);
-    if(candidate){post.title=rawTitle.replace(new RegExp(`\\s*[｜|]?\\s*${candidate.name}\\s*$`),'').trim()||rawTitle}
+    const post={id:url||tag(b,'guid'),groupId,group,author:null,memberColor:null,memberColorHex:null,_routeAuthor:routeHint?.name||null,title:rawTitle,publishedAt:safeISO(d),url,image:rssImage(b,desc)};
     return post;
   }).filter(x=>x.url&&x.publishedAt)
 }
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function canonicalKenshuDetail(raw=''){
   try{
     const u=new URL(decode(raw),'https://www.upfc.jp');
@@ -197,7 +202,7 @@ async function getPostIndex(){
     const listUrl='https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI';
     const r=await fetch(listUrl,{
       headers:{
-        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.8.2)',
+        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)',
         'Accept':'text/html,application/xhtml+xml'
       },
       cf:{cacheEverything:true,cacheTtl:90}
@@ -239,7 +244,7 @@ async function handler(req){
 
   let filtered=allPosts;
   if(group) filtered=filtered.filter(p=>p.groupId===group);
-  if(member) filtered=filtered.filter(p=>p.author===member);
+  if(member) filtered=filtered.filter(p=>p.groupId==='kenshusei'?p.author===member:p._routeAuthor===member);
 
   const total=filtered.length;
   const page=filtered.slice(offset,offset+limit);
@@ -248,6 +253,7 @@ async function handler(req){
   // RSS/Kenshusei index requests (~15) + at most 20 article requests stay below
   // the Workers Free external-subrequest ceiling.
   await enrichPageDetails(page);
+  for(const p of page) delete p._routeAuthor;
 
   return new Response(JSON.stringify({
     posts:page,total,offset,limit,hasMore:offset+page.length<total,
