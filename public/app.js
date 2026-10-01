@@ -56,15 +56,52 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .fav-member-chip .fav-mark{font-size:12px}
 
 
-/* v0.9.0 favorite shine: one pass when a favorite card first enters view */
-.card.fav{position:relative;overflow:hidden}
-.card.fav::before{content:"";position:absolute;z-index:5;left:-70%;bottom:-70%;width:42%;height:210%;pointer-events:none;opacity:0;transform:rotate(32deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.22),rgba(255,255,255,.92),rgba(255,255,255,.24),transparent);filter:blur(1px)}
-.card.fav.shine-once::before{animation:hpFavShine .9s cubic-bezier(.22,.72,.25,1) 1}
-.card.fav::after{content:"✦  ✧";position:absolute;z-index:6;left:9%;bottom:8%;pointer-events:none;color:var(--fav-outline,#ffd54a);font-size:16px;letter-spacing:18px;opacity:0;text-shadow:0 0 7px rgba(255,255,255,.95)}
-.card.fav.shine-once::after{animation:hpFavSparkle 1.05s ease-out 1}
-@keyframes hpFavShine{0%{left:-70%;bottom:-70%;opacity:0}15%{opacity:.9}75%{opacity:.8}100%{left:135%;bottom:80%;opacity:0}}
-@keyframes hpFavSparkle{0%,12%{opacity:0;transform:translate(0,8px) scale(.7)}38%{opacity:1}100%{opacity:0;transform:translate(185px,-95px) scale(1.25)}}
-@media (prefers-reduced-motion:reduce){.card.fav.shine-once::before,.card.fav.shine-once::after{animation:none!important}}
+/* v0.9.2 推しエフェクト：レアカード風ホログラム + メンバーカラー♡ */
+.card.fav{position:relative;overflow:visible;isolation:isolate}
+.card.fav .card-main,.card.fav .thumb{position:relative;z-index:2}
+.card.fav::before{
+ content:"";position:absolute;z-index:7;left:-82%;bottom:-85%;width:48%;height:235%;
+ pointer-events:none;opacity:0;transform:rotate(31deg);
+ background:linear-gradient(90deg,transparent 0%,rgba(112,232,255,.18) 18%,rgba(255,255,255,.98) 46%,rgba(255,218,255,.82) 58%,rgba(255,244,142,.28) 75%,transparent 100%);
+ filter:blur(1.2px);mix-blend-mode:screen
+}
+.card.fav.oshi-rare::before{animation:oshiHoloSweep .95s cubic-bezier(.18,.7,.2,1) 1}
+.card.fav::after{
+ content:"";position:absolute;z-index:1;inset:-7px;border-radius:25px;pointer-events:none;opacity:0;
+ box-shadow:0 0 10px var(--fav-outline),0 0 24px var(--fav-outline),0 0 42px color-mix(in srgb,var(--fav-outline) 62%,transparent);
+ background:radial-gradient(circle at 15% 85%,color-mix(in srgb,var(--fav-outline) 24%,transparent),transparent 34%),
+            radial-gradient(circle at 82% 18%,rgba(150,225,255,.28),transparent 31%)
+}
+.card.fav.oshi-rare::after{animation:oshiAura 1.65s ease-out 1}
+.oshi-particles{position:absolute;z-index:9;inset:-20px;overflow:visible;pointer-events:none}
+.oshi-particle{position:absolute;left:var(--x);top:var(--y);color:var(--fav-outline);opacity:0;
+ text-shadow:0 0 5px #fff,0 0 11px currentColor,0 0 18px currentColor;
+ font-size:var(--s);transform:translate(0,10px) scale(.35) rotate(var(--r))}
+.oshi-rare .oshi-particle{animation:oshiParticle 1.35s cubic-bezier(.18,.7,.25,1) var(--d) 1}
+.oshi-particle.spark{color:#fff}
+@keyframes oshiHoloSweep{
+ 0%{left:-82%;bottom:-85%;opacity:0}
+ 10%{opacity:.75}
+ 42%{opacity:1;filter:blur(.5px) drop-shadow(0 0 10px #fff)}
+ 78%{opacity:.92}
+ 100%{left:142%;bottom:92%;opacity:0}
+}
+@keyframes oshiAura{
+ 0%{opacity:0;transform:scale(.985)}
+ 24%{opacity:.9}
+ 48%{opacity:1;transform:scale(1.018)}
+ 76%{opacity:.62}
+ 100%{opacity:0;transform:scale(1)}
+}
+@keyframes oshiParticle{
+ 0%{opacity:0;transform:translate(0,10px) scale(.25) rotate(var(--r))}
+ 18%{opacity:1}
+ 58%{opacity:1;transform:translate(var(--dx),var(--dy)) scale(1.15) rotate(calc(var(--r) + 12deg))}
+ 100%{opacity:0;transform:translate(calc(var(--dx) * 1.28),calc(var(--dy) * 1.28)) scale(.7) rotate(calc(var(--r) + 25deg))}
+}
+@media (prefers-reduced-motion:reduce){
+ .card.fav.oshi-rare::before,.card.fav.oshi-rare::after,.oshi-rare .oshi-particle{animation:none!important}
+}}
 
 `;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
@@ -93,23 +130,23 @@ function latestOrderedPosts(){
    return new Date(b.publishedAt)-new Date(a.publishedAt);
  });
 }
-const shinedFavoritePosts=new Set();
+const shownOshiEffects=new Set();
 function bindFavoriteEffects(){
  requestAnimationFrame(()=>{
   const nodes=[...document.querySelectorAll('.card.fav[data-post-id]')];
   if(!nodes.length)return;
   const play=el=>{
    const id=el.dataset.postId;
-   if(!id||shinedFavoritePosts.has(id))return;
-   shinedFavoritePosts.add(id);
-   el.classList.add('shine-once');
-   setTimeout(()=>el.classList.remove('shine-once'),1200);
+   if(!id||shownOshiEffects.has(id))return;
+   shownOshiEffects.add(id);
+   el.classList.add('oshi-rare');
+   setTimeout(()=>el.classList.remove('oshi-rare'),1850);
   };
   if(!('IntersectionObserver'in window)){nodes.forEach(play);return}
   const io=new IntersectionObserver(entries=>{
    for(const e of entries)if(e.isIntersecting){play(e.target);io.unobserve(e.target)}
   },{threshold:.28});
-  nodes.forEach(el=>{if(!shinedFavoritePosts.has(el.dataset.postId))io.observe(el)});
+  nodes.forEach(el=>{if(!shownOshiEffects.has(el.dataset.postId))io.observe(el)});
  });
 }
 function rel(d){let x=Date.now()-new Date(d),m=Math.floor(x/60000),h=Math.floor(x/3600000);if(m<60)return `${Math.max(1,m)}分前`;if(h<24)return `${h}時間前`;if(h<48)return `昨日 ${new Date(d).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}`;return new Date(d).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
@@ -183,7 +220,19 @@ function openPost(id){
   location.href=p.url;
 }
 function colorDot(hex){const h=hex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(h);return `<span class="author-dot${white?' white':''}" style="background:${h}"></span>`}
-function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),color=p.memberColorHex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(color);const favOutline=white?'#B8BCC4':color;return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')"><button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
+function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),color=p.memberColorHex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(color);const favOutline=white?'#B8BCC4':color;const particles=f?`<span class="oshi-particles" aria-hidden="true">
+<span class="oshi-particle heart" style="--x:4%;--y:78%;--s:20px;--r:-14deg;--d:.12s;--dx:-8px;--dy:-38px">♥</span>
+<span class="oshi-particle spark" style="--x:12%;--y:14%;--s:15px;--r:8deg;--d:.24s;--dx:-4px;--dy:-28px">✦</span>
+<span class="oshi-particle heart" style="--x:28%;--y:92%;--s:15px;--r:12deg;--d:.31s;--dx:8px;--dy:-34px">♥</span>
+<span class="oshi-particle spark" style="--x:43%;--y:4%;--s:18px;--r:-5deg;--d:.42s;--dx:3px;--dy:-25px">✧</span>
+<span class="oshi-particle heart" style="--x:62%;--y:94%;--s:18px;--r:-9deg;--d:.48s;--dx:7px;--dy:-42px">♥</span>
+<span class="oshi-particle spark" style="--x:75%;--y:8%;--s:15px;--r:9deg;--d:.55s;--dx:6px;--dy:-31px">✦</span>
+<span class="oshi-particle heart" style="--x:91%;--y:73%;--s:22px;--r:13deg;--d:.61s;--dx:11px;--dy:-39px">♥</span>
+<span class="oshi-particle spark" style="--x:96%;--y:24%;--s:14px;--r:-8deg;--d:.69s;--dx:10px;--dy:-24px">✧</span>
+<span class="oshi-particle heart" style="--x:50%;--y:86%;--s:13px;--r:6deg;--d:.72s;--dx:-2px;--dy:-30px">♥</span>
+<span class="oshi-particle spark" style="--x:21%;--y:48%;--s:12px;--r:0deg;--d:.76s;--dx:-8px;--dy:-25px">✦</span>
+</span>`:'';
+return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')">${particles}<button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=openPost;window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
 function topBar(){return `<header class="top"><img class="hp-idols left desktop" src="./assets/idols-left.png" alt=""><img class="hp-idols left mobile" src="./assets/idols-left-mobile.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right desktop" src="./assets/idols-right.png" alt=""><img class="hp-idols right mobile" src="./assets/idols-right-mobile.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
@@ -220,7 +269,7 @@ function settings(){
      }).join('')}</div>
    </section>`;
  }).join('');
- return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ お気に入りメンバー</h3><div class="fav-groups">${sections}</div></div></div>`;
+ return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ 推しメンバー</h3><div class="fav-groups">${sections}</div></div></div>`;
 }
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
 window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
