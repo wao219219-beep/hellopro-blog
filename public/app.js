@@ -56,54 +56,97 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .fav-member-chip .fav-mark{font-size:12px}
 
 
-/* v0.9.2 推しエフェクト：レアカード風ホログラム + メンバーカラー♡ */
+/* v0.9.3 推しエフェクト
+   - カード形状は固定
+   - 初回だけカード内部でホログラム反射
+   - 上部固定中はメンバーカラーの♡/✦を常時表示 */
 .card.fav{position:relative;overflow:visible;isolation:isolate}
-.card.fav .card-main,.card.fav .thumb{position:relative;z-index:2}
-.card.fav::before{
- content:"";position:absolute;z-index:7;left:-82%;bottom:-85%;width:48%;height:235%;
- pointer-events:none;opacity:0;transform:rotate(31deg);
- background:linear-gradient(90deg,transparent 0%,rgba(112,232,255,.18) 18%,rgba(255,255,255,.98) 46%,rgba(255,218,255,.82) 58%,rgba(255,244,142,.28) 75%,transparent 100%);
- filter:blur(1.2px);mix-blend-mode:screen
+.card.fav .card-main,.card.fav .thumb{position:relative;z-index:3}
+
+/* 初回の反射光はカード矩形の中だけ。外へ伸びる斜め帯は廃止 */
+.oshi-surface{position:absolute;z-index:6;inset:0;border-radius:22px;overflow:hidden;pointer-events:none}
+.oshi-surface::before{
+ content:"";position:absolute;inset:-30%;
+ opacity:0;transform:translateX(-72%);
+ background:
+   linear-gradient(112deg,
+    transparent 26%,
+    rgba(104,220,255,.10) 34%,
+    rgba(255,255,255,.92) 43%,
+    rgba(255,213,248,.72) 49%,
+    rgba(255,242,142,.36) 55%,
+    rgba(124,226,255,.16) 61%,
+    transparent 70%);
+ mix-blend-mode:screen
 }
-.card.fav.oshi-rare::before{animation:oshiHoloSweep .95s cubic-bezier(.18,.7,.2,1) 1}
-.card.fav::after{
- content:"";position:absolute;z-index:1;inset:-7px;border-radius:25px;pointer-events:none;opacity:0;
- box-shadow:0 0 10px var(--fav-outline),0 0 24px var(--fav-outline),0 0 42px color-mix(in srgb,var(--fav-outline) 62%,transparent);
- background:radial-gradient(circle at 15% 85%,color-mix(in srgb,var(--fav-outline) 24%,transparent),transparent 34%),
-            radial-gradient(circle at 82% 18%,rgba(150,225,255,.28),transparent 31%)
+.card.fav.oshi-rare .oshi-surface::before{animation:oshiInnerSweep 1.05s cubic-bezier(.18,.72,.2,1) 1}
+.oshi-surface::after{
+ content:"";position:absolute;inset:0;border-radius:inherit;opacity:0;
+ background:radial-gradient(circle at 48% 52%,rgba(255,255,255,.92),rgba(255,255,255,.24) 34%,transparent 70%)
 }
-.card.fav.oshi-rare::after{animation:oshiAura 1.65s ease-out 1}
-.oshi-particles{position:absolute;z-index:9;inset:-20px;overflow:visible;pointer-events:none}
-.oshi-particle{position:absolute;left:var(--x);top:var(--y);color:var(--fav-outline);opacity:0;
- text-shadow:0 0 5px #fff,0 0 11px currentColor,0 0 18px currentColor;
- font-size:var(--s);transform:translate(0,10px) scale(.35) rotate(var(--r))}
-.oshi-rare .oshi-particle{animation:oshiParticle 1.35s cubic-bezier(.18,.7,.25,1) var(--d) 1}
+.card.fav.oshi-rare .oshi-surface::after{animation:oshiFlash 1.25s ease-out 1}
+
+/* 外周発光はカード形状を保ったぼかしだけ */
+.card.fav.oshi-rare{animation:oshiCardGlow 1.65s ease-out 1}
+@keyframes oshiInnerSweep{
+ 0%{opacity:0;transform:translateX(-72%)}
+ 12%{opacity:.65}
+ 46%{opacity:1}
+ 100%{opacity:0;transform:translateX(72%)}
+}
+@keyframes oshiFlash{
+ 0%,18%{opacity:0}
+ 40%{opacity:.68}
+ 58%{opacity:.22}
+ 100%{opacity:0}
+}
+@keyframes oshiCardGlow{
+ 0%{box-shadow:0 0 0 0 transparent}
+ 30%{box-shadow:0 0 12px 3px var(--fav-outline),0 0 30px 7px color-mix(in srgb,var(--fav-outline) 45%,transparent)}
+ 58%{box-shadow:0 0 18px 4px var(--fav-outline),0 0 38px 9px rgba(255,255,255,.30)}
+ 100%{box-shadow:0 0 0 0 transparent}
+}
+
+/* 粒子 */
+.oshi-particles{position:absolute;z-index:9;inset:-16px;overflow:visible;pointer-events:none}
+.oshi-particle{
+ position:absolute;left:var(--x);top:var(--y);color:var(--fav-outline);opacity:0;
+ font-size:var(--s);line-height:1;
+ text-shadow:0 0 5px #fff,0 0 10px currentColor,0 0 17px currentColor;
+ transform:translateY(5px) scale(.72) rotate(var(--r))
+}
 .oshi-particle.spark{color:#fff}
-@keyframes oshiHoloSweep{
- 0%{left:-82%;bottom:-85%;opacity:0}
- 10%{opacity:.75}
- 42%{opacity:1;filter:blur(.5px) drop-shadow(0 0 10px #fff)}
- 78%{opacity:.92}
- 100%{left:142%;bottom:92%;opacity:0}
+
+/* 初回は少し大きく舞う */
+.oshi-rare .oshi-particle{animation:oshiBurst 1.45s cubic-bezier(.18,.7,.25,1) var(--d) 1}
+@keyframes oshiBurst{
+ 0%{opacity:0;transform:translateY(8px) scale(.35) rotate(var(--r))}
+ 20%{opacity:1}
+ 60%{opacity:1;transform:translate(var(--dx),var(--dy)) scale(1.16) rotate(calc(var(--r) + 10deg))}
+ 100%{opacity:0;transform:translate(calc(var(--dx)*1.2),calc(var(--dy)*1.2)) scale(.72) rotate(calc(var(--r) + 18deg))}
 }
-@keyframes oshiAura{
- 0%{opacity:0;transform:scale(.985)}
- 24%{opacity:.9}
- 48%{opacity:1;transform:scale(1.018)}
- 76%{opacity:.62}
- 100%{opacity:0;transform:scale(1)}
+
+/* 最新記事の先頭固定中だけ、♡と少量の星を常時ふわふわ表示 */
+.card.oshi-pinned{
+ box-shadow:0 0 9px color-mix(in srgb,var(--fav-outline) 35%,transparent),
+            0 0 22px color-mix(in srgb,var(--fav-outline) 18%,transparent)
 }
-@keyframes oshiParticle{
- 0%{opacity:0;transform:translate(0,10px) scale(.25) rotate(var(--r))}
- 18%{opacity:1}
- 58%{opacity:1;transform:translate(var(--dx),var(--dy)) scale(1.15) rotate(calc(var(--r) + 12deg))}
- 100%{opacity:0;transform:translate(calc(var(--dx) * 1.28),calc(var(--dy) * 1.28)) scale(.7) rotate(calc(var(--r) + 25deg))}
+.card.oshi-pinned .oshi-particle{
+ opacity:.78;
+ animation:oshiFloat var(--float,2.7s) ease-in-out var(--fd,0s) infinite alternate
+}
+.card.oshi-pinned .oshi-particle.spark{opacity:.55}
+.card.oshi-pinned.oshi-rare .oshi-particle{animation:oshiBurst 1.45s cubic-bezier(.18,.7,.25,1) var(--d) 1}
+@keyframes oshiFloat{
+ 0%{transform:translate(0,3px) scale(.82) rotate(var(--r));filter:brightness(.92)}
+ 50%{opacity:1;filter:brightness(1.35)}
+ 100%{transform:translate(var(--fx,4px),var(--fy,-8px)) scale(1.08) rotate(calc(var(--r) + 7deg));filter:brightness(1.12)}
 }
 @media (prefers-reduced-motion:reduce){
- .card.fav.oshi-rare::before,.card.fav.oshi-rare::after,.oshi-rare .oshi-particle{animation:none!important}
-}}
-
-`;document.head.appendChild(mobileFix);
+ .card.fav.oshi-rare,.card.fav.oshi-rare .oshi-surface::before,.card.fav.oshi-rare .oshi-surface::after,
+ .oshi-rare .oshi-particle,.card.oshi-pinned .oshi-particle{animation:none!important}
+ .card.oshi-pinned .oshi-particle{opacity:.65}
+}`;document.head.appendChild(mobileFix);
 const API = localStorage.getItem('hp_api') || '/api/posts';
 // Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
 const groups=[
@@ -133,7 +176,7 @@ function latestOrderedPosts(){
 const shownOshiEffects=new Set();
 function bindFavoriteEffects(){
  requestAnimationFrame(()=>{
-  const nodes=[...document.querySelectorAll('.card.fav[data-post-id]')];
+  const nodes=[...document.querySelectorAll('.card.oshi-pinned[data-post-id]')];
   if(!nodes.length)return;
   const play=el=>{
    const id=el.dataset.postId;
@@ -220,19 +263,19 @@ function openPost(id){
   location.href=p.url;
 }
 function colorDot(hex){const h=hex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(h);return `<span class="author-dot${white?' white':''}" style="background:${h}"></span>`}
-function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),color=p.memberColorHex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(color);const favOutline=white?'#B8BCC4':color;const particles=f?`<span class="oshi-particles" aria-hidden="true">
-<span class="oshi-particle heart" style="--x:4%;--y:78%;--s:20px;--r:-14deg;--d:.12s;--dx:-8px;--dy:-38px">♥</span>
-<span class="oshi-particle spark" style="--x:12%;--y:14%;--s:15px;--r:8deg;--d:.24s;--dx:-4px;--dy:-28px">✦</span>
-<span class="oshi-particle heart" style="--x:28%;--y:92%;--s:15px;--r:12deg;--d:.31s;--dx:8px;--dy:-34px">♥</span>
-<span class="oshi-particle spark" style="--x:43%;--y:4%;--s:18px;--r:-5deg;--d:.42s;--dx:3px;--dy:-25px">✧</span>
-<span class="oshi-particle heart" style="--x:62%;--y:94%;--s:18px;--r:-9deg;--d:.48s;--dx:7px;--dy:-42px">♥</span>
-<span class="oshi-particle spark" style="--x:75%;--y:8%;--s:15px;--r:9deg;--d:.55s;--dx:6px;--dy:-31px">✦</span>
-<span class="oshi-particle heart" style="--x:91%;--y:73%;--s:22px;--r:13deg;--d:.61s;--dx:11px;--dy:-39px">♥</span>
-<span class="oshi-particle spark" style="--x:96%;--y:24%;--s:14px;--r:-8deg;--d:.69s;--dx:10px;--dy:-24px">✧</span>
-<span class="oshi-particle heart" style="--x:50%;--y:86%;--s:13px;--r:6deg;--d:.72s;--dx:-2px;--dy:-30px">♥</span>
-<span class="oshi-particle spark" style="--x:21%;--y:48%;--s:12px;--r:0deg;--d:.76s;--dx:-8px;--dy:-25px">✦</span>
+function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),pinned=isPinnedFavorite(p),color=p.memberColorHex||'#A0A0A8';const white=/^#(?:fff|ffffff)$/i.test(color);const favOutline=white?'#B8BCC4':color;const particles=f?`<span class="oshi-particles" aria-hidden="true">
+<span class="oshi-particle heart" style="--x:4%;--y:78%;--s:20px;--r:-14deg;--d:.12s;--dx:-8px;--dy:-38px;--fx:-3px;--fy:-10px;--float:2.4s;--fd:-.6s">♥</span>
+<span class="oshi-particle spark" style="--x:12%;--y:14%;--s:15px;--r:8deg;--d:.24s;--dx:-4px;--dy:-28px;--fx:3px;--fy:-6px;--float:2.1s;--fd:-1.1s">✦</span>
+<span class="oshi-particle heart" style="--x:28%;--y:92%;--s:15px;--r:12deg;--d:.31s;--dx:8px;--dy:-34px;--fx:4px;--fy:-9px;--float:2.9s;--fd:-.2s">♥</span>
+<span class="oshi-particle spark" style="--x:43%;--y:4%;--s:18px;--r:-5deg;--d:.42s;--dx:3px;--dy:-25px;--fx:-2px;--fy:-7px;--float:2.3s;--fd:-.9s">✧</span>
+<span class="oshi-particle heart" style="--x:62%;--y:94%;--s:18px;--r:-9deg;--d:.48s;--dx:7px;--dy:-42px;--fx:3px;--fy:-11px;--float:3.1s;--fd:-1.4s">♥</span>
+<span class="oshi-particle spark" style="--x:75%;--y:8%;--s:15px;--r:9deg;--d:.55s;--dx:6px;--dy:-31px;--fx:-3px;--fy:-6px;--float:2.5s;--fd:-.4s">✦</span>
+<span class="oshi-particle heart" style="--x:91%;--y:73%;--s:22px;--r:13deg;--d:.61s;--dx:11px;--dy:-39px;--fx:5px;--fy:-10px;--float:2.7s;--fd:-1.2s">♥</span>
+<span class="oshi-particle spark" style="--x:96%;--y:24%;--s:14px;--r:-8deg;--d:.69s;--dx:10px;--dy:-24px;--fx:-2px;--fy:-7px;--float:2.2s;--fd:-.5s">✧</span>
+<span class="oshi-particle heart" style="--x:50%;--y:86%;--s:13px;--r:6deg;--d:.72s;--dx:-2px;--dy:-30px;--fx:-4px;--fy:-8px;--float:3s;--fd:-.8s">♥</span>
+<span class="oshi-particle spark" style="--x:21%;--y:48%;--s:12px;--r:0deg;--d:.76s;--dx:-8px;--dy:-25px;--fx:3px;--fy:-6px;--float:2.6s;--fd:-1.5s">✦</span>
 </span>`:'';
-return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')">${particles}<button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
+return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''} ${pinned?'oshi-pinned':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')">${f?'<span class="oshi-surface" aria-hidden="true"></span>':''}${particles}<button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=openPost;window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
 function topBar(){return `<header class="top"><img class="hp-idols left desktop" src="./assets/idols-left.png" alt=""><img class="hp-idols left mobile" src="./assets/idols-left-mobile.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right desktop" src="./assets/idols-right.png" alt=""><img class="hp-idols right mobile" src="./assets/idols-right-mobile.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
