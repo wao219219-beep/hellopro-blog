@@ -114,7 +114,7 @@ function bindFavoriteEffects(){
 }
 function rel(d){let x=Date.now()-new Date(d),m=Math.floor(x/60000),h=Math.floor(x/3600000);if(m<60)return `${Math.max(1,m)}分前`;if(h<24)return `${h}時間前`;if(h<48)return `昨日 ${new Date(d).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}`;return new Date(d).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 
-const pageCacheKey=()=>`hp_page_v09:${state.tab}:${state.group||''}:${state.member||'all'}`;
+const pageCacheKey=()=>`hp_page_v091:${state.tab}:${state.group||''}:${state.member||'all'}`;
 function savePageCache(){try{localStorage.setItem(pageCacheKey(),JSON.stringify({t:Date.now(),posts:state.posts,hasMore:state.hasMore,total:state.total,groupCounts:state.groupCounts,memberMaster:state.memberMaster}))}catch(_){}}
 function restorePageCache(){try{const v=JSON.parse(localStorage.getItem(pageCacheKey())||'null');if(!v||!Array.isArray(v.posts)||Date.now()-v.t>6*3600e3)return false;state.posts=v.posts;state.hasMore=!!v.hasMore;state.total=v.total||v.posts.length;state.groupCounts=v.groupCounts||state.groupCounts;state.memberMaster=v.memberMaster||state.memberMaster;return true}catch(_){return false}}
 let prefetched=null;

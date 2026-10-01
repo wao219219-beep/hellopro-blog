@@ -70,30 +70,54 @@ function articleImageFromHTML(html=''){
   }
   return '';
 }
-function articleThemeMemberFromHTML(html='',groupId=''){
-  // Hello! Project's shared Ameba blogs use the article "テーマ" field as the
-  // posting member. For Ameba this is the only authoritative author source.
-  const source=html.replace(/\\u002F/gi,'/').replace(/\\\//g,'/').replace(/&quot;/g,'"');
-  const windows=[];
-  const marker=/テーマ\s*[：:]/g;
-  let hit;
-  while((hit=marker.exec(source))) windows.push(source.slice(hit.index,hit.index+700));
-
-  for(const chunk of windows){
-    // Prefer linked theme text, which is how Ameba normally renders the field.
-    const a=chunk.match(/テーマ\s*[：:][\s\S]{0,260}?<a\b[^>]*>([\s\S]{1,120}?)<\/a>/i);
-    if(a){
-      const member=memberRecord(groupId,text(a[1]));
-      if(member)return member;
-    }
-    // Fallback only for alternate HTML rendering of the SAME theme field.
-    // This is not an author/title/body inference.
-    const plain=text(chunk).replace(/^.*?テーマ\s*[：:]\s*/,'');
-    for(const member of membersForGroup(groupId)){
-      if(normalizeName(plain).startsWith(normalizeName(member.name))) return member;
-    }
+function decodeJsString(raw=''){
+  try{return JSON.parse(`"${String(raw).replace(/"/g,'\\"')}"`)}
+  catch(_){
+    return String(raw)
+      .replace(/\\u([0-9a-f]{4})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
+      .replace(/\\x([0-9a-f]{2})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
+      .replace(/\\\//g,'/');
   }
-  return null;
+}
+function articleThemeMemberFromHTML(html='',groupId=''){
+  // Ameba stores the article theme in window.INIT_DATA -> entryState ->
+  // entryMap -> <entryId> -> theme_name. This is the primary source.
+  const candidates=[];
+  const push=v=>{
+    const value=text(decodeJsString(v||'')).trim();
+    if(value && !candidates.includes(value)) candidates.push(value);
+  };
+
+  // Current Ameba INIT_DATA representation.
+  const jsonTheme=/(?:["']theme_name["']|theme_name)\s*:\s*"((?:\\.|[^"\\])*)"/gi;
+  let m;
+  while((m=jsonTheme.exec(html))) push(m[1]);
+
+  // Tolerate a camelCase variant if Ameba changes the serialized key.
+  const camelTheme=/(?:["']themeName["']|themeName)\s*:\s*"((?:\\.|[^"\\])*)"/gi;
+  while((m=camelTheme.exec(html))) push(m[1]);
+
+  // Secondary representation of the SAME Theme field in rendered/archive HTML.
+  // This is deliberately not an author/title/body inference.
+  const rendered=html
+    .replace(/\\u([0-9a-f]{4})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
+    .replace(/\\x([0-9a-f]{2})/gi,(_,h)=>String.fromCharCode(parseInt(h,16)))
+    .replace(/\\\//g,'/');
+  const themeBlocks=rendered.match(/data-uranus-component=["']entryItemTheme["'][^>]*>[\s\S]{0,600}?<\/(?:dl|div|section)>/gi)||[];
+  for(const block of themeBlocks){
+    const a=block.match(/<a\b[^>]*>([\s\S]*?)<\/a>/i);
+    if(a) push(a[1]);
+  }
+
+  // Only a value that exactly matches a member of THIS group is accepted.
+  // If multiple different member themes somehow exist in the page payload,
+  // fail closed rather than assigning the wrong author.
+  const matched=[];
+  for(const value of candidates){
+    const member=memberRecord(groupId,value);
+    if(member && !matched.some(x=>x.name===member.name)) matched.push(member);
+  }
+  return matched.length===1 ? matched[0] : null;
 }
 function applyMember(post,member){
   if(!member){post.author=null;post.memberColor=null;post.memberColorHex=null;return}
@@ -110,7 +134,7 @@ async function enrichPageDetails(posts){
       try {
         const r = await fetch(p.url, {
           headers: {
-            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)',
+            'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.1)',
             'Accept':'text/html,application/xhtml+xml'
           },
           // Article pages rarely change after publication. Reuse Cloudflare's
@@ -147,7 +171,7 @@ function parseRSS(xml,groupId,group){
     return post;
   }).filter(x=>x.url&&x.publishedAt)
 }
-async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
+async function fetchBlog(src){let [groupId,group,ameba]=src;let url=`https://rssblog.ameba.jp/${ameba}/rss20.xml`;let r=await fetch(url,{headers:{'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.1)','Accept':'application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8'},cf:{cacheEverything:true,cacheTtl:90}});if(!r.ok)throw new Error(`${ameba}: ${r.status}`);let posts=parseRSS(await r.text(),groupId,group);if(!posts.length)throw new Error(`${ameba}: empty feed`);return {ameba,posts}}
 function canonicalKenshuDetail(raw=''){
   try{
     const u=new URL(decode(raw),'https://www.upfc.jp');
@@ -202,7 +226,7 @@ async function getPostIndex(){
     const listUrl='https://www.upfc.jp/helloproject/artist/trcontents_list.php?%40rst=all&%40uid=KENSYUSEI';
     const r=await fetch(listUrl,{
       headers:{
-        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.0)',
+        'User-Agent':'Mozilla/5.0 (compatible; HelloProBlog/0.9.1)',
         'Accept':'text/html,application/xhtml+xml'
       },
       cf:{cacheEverything:true,cacheTtl:90}
@@ -267,7 +291,7 @@ function cors(){return {'access-control-allow-origin':'*','access-control-allow-
 // from fanning out into many RSS/article requests at once.
 const API_INFLIGHT = new Map();
 function apiCacheRequest(request, tier='fresh'){
-  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_cache',tier);
+  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_schema','v091');u.searchParams.set('__hp_cache',tier);
   return new Request(u.toString(),{method:'GET'});
 }
 async function cachedApi(request){
