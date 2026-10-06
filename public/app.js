@@ -56,6 +56,9 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
 .fav-member-chip .fav-mark{font-size:12px}
 
 
+/* v0.9.5 version label */
+.app-version{margin:18px 0 4px;text-align:center;font-size:11px;color:var(--sub,#999);opacity:.8}
+
 /* v0.9.3 推しエフェクト
    - カード形状は固定
    - 初回だけカード内部でホログラム反射
@@ -147,6 +150,7 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
  .oshi-rare .oshi-particle,.card.oshi-pinned .oshi-particle{animation:none!important}
  .card.oshi-pinned .oshi-particle{opacity:.65}
 }`;document.head.appendChild(mobileFix);
+const APP_VERSION='0.9.5';
 const API = localStorage.getItem('hp_api') || '/api/posts';
 // Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
 const groups=[
@@ -239,7 +243,7 @@ function queryFor(offset=0,bust=true){
  if(bust) q.set('_',String(Date.now()));
  return `${API}?${q}`;
 }
-async function load(show=true,append=false,manual=false){
+async function load(show=true,append=false,manual=false,auto=false){
  const refreshStarted=Date.now();
  if(manual) pull.refreshing=true;
  let ok=false;const gen=viewGen;
@@ -247,7 +251,8 @@ async function load(show=true,append=false,manual=false){
  // Instant paint from the previous successful page while fresh data loads behind it.
  if(!append&&!state.posts.length) restorePageCache();
  if(append) state.loadingMore=true; else state.loading=show&&!state.posts.length;
- render();
+ // v0.9.5: background page loads draw only once, when their page has arrived.
+ if(!auto) render();
  try{
   const oldIds=new Set(state.posts.map(x=>x.id));
   const offset=append?nextCursor():0;
@@ -289,7 +294,7 @@ async function load(show=true,append=false,manual=false){
  // returned no confirmed posts.
  const memberEmpty=state.tab==='groups'&&state.member!=='all'&&!state.posts.length;
  if(ok&&sameView&&state.hasMore&&autoFillPages<AUTO_FILL_MAX_PAGES&&(needs48hFill()||restorePending||memberEmpty)){
-  autoFillPages++;setTimeout(()=>{if(state.hasMore&&!state.loading&&!state.loadingMore)load(false,true)},150);
+  autoFillPages++;setTimeout(()=>{if(state.hasMore&&!state.loading&&!state.loadingMore)load(false,true,false,true)},150);
  }else{
   if(restoreTarget)finishRestore();
   setTimeout(prefetchNext,500);
@@ -389,13 +394,35 @@ function settings(){
      }).join('')}</div>
    </section>`;
  }).join('');
- return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ 推しメンバー</h3><div class="fav-groups">${sections}</div></div></div>`;
+ return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ 推しメンバー</h3><div class="fav-groups">${sections}</div><div class="app-version">ハロプロブログ v${APP_VERSION}</div></div></div>`;
 }
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
 window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
 window.goGroups=()=>{state.tab='groups';state.group=null;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
 function bottom(){return `<nav class="bottom"><button class="tab ${state.tab==='latest'?'on':''}" onclick="goLatest()"><span>◷</span>最新記事</button><button class="tab ${state.tab==='groups'?'on':''}" onclick="goGroups()"><span>▦</span>グループ別</button></nav>`}
-function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`;bindFavoriteEffects();if(restoreTarget&&state.posts.length)requestAnimationFrame(applyRestore)}
+// v0.9.5: every render rebuilds the list with innerHTML, which recreated every
+// card and thumbnail. iPhone Safari then blanked and re-showed the images
+// (flicker) and a running 推しエフェクト was cut off. After rebuilding, put back
+// the previous node for every card whose markup did not change, and the
+// previous <img> for changed cards that still show the same thumbnail.
+function cardSig(el){
+ const raw=el.getAttribute('class')||'',norm=[...el.classList].filter(x=>x!=='oshi-rare').sort().join(' ');
+ return el.outerHTML.replace(`class="${raw}"`,`class="${norm}"`);
+}
+function keepNodes(root,render){
+ const oldCards=new Map(),oldImgs=new Map();
+ for(const el of root.querySelectorAll('.card[data-post-id]'))if(!oldCards.has(el.dataset.postId))oldCards.set(el.dataset.postId,{el,sig:cardSig(el)});
+ for(const img of root.querySelectorAll('img.thumb')){const k=img.getAttribute('src');if(k&&!oldImgs.has(k))oldImgs.set(k,img)}
+ render();
+ if(!oldCards.size)return;
+ for(const el of root.querySelectorAll('.card[data-post-id]')){
+  const prev=oldCards.get(el.dataset.postId);
+  if(prev&&prev.sig===cardSig(el)){el.replaceWith(prev.el);oldCards.delete(el.dataset.postId);continue}
+  const img=el.querySelector('img.thumb'),k=img&&img.getAttribute('src'),pi=k&&oldImgs.get(k);
+  if(pi&&!pi.isConnected&&pi!==img){img.replaceWith(pi);oldImgs.delete(k)}
+ }
+}
+function render(){saveNav();const app=document.getElementById('app');keepNodes(app,()=>{app.innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`});bindFavoriteEffects();if(restoreTarget&&state.posts.length)requestAnimationFrame(applyRestore)}
 function updatePtr(){const el=document.getElementById('ptr');if(!el)return;if(pull.refreshing){el.className='ptr show refreshing';el.style.transform='translateY(0) scale(1)';return}const d=Math.min(110,pull.distance);const progress=Math.min(1,d/78);el.className='ptr'+(d>4?' show':'');el.style.opacity=String(progress);el.style.transform=`translateY(${Math.max(-18,-18+d*.42)}px) scale(${.78+.22*progress})`;const sp=el.querySelector('.ptr-spinner');if(sp)sp.style.transform=`rotate(${progress*250}deg)`}
 addEventListener('touchstart',e=>{if(scrollY<=0&&!pull.refreshing){pull.startY=e.touches[0].clientY;pull.distance=0;pull.tracking=true}},{passive:true});
 addEventListener('touchmove',e=>{if(!pull.tracking||pull.refreshing)return;const dy=e.touches[0].clientY-pull.startY;if(dy<=0){pull.distance=0;updatePtr();return}pull.distance=Math.min(110,dy*.62);updatePtr();if(pull.distance>8)e.preventDefault()},{passive:false});
