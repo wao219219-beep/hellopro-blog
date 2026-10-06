@@ -251,6 +251,9 @@ async function getPostIndex(){
   return {posts,sources};
 }
 
+// Max article-detail fetches per member-view request: ~15 index requests + 30
+// stays below the Workers Free 50-subrequest ceiling.
+const MEMBER_SCAN_BUDGET=30;
 async function handler(req){
   const started=Date.now();
   if(req.method==='OPTIONS') return new Response(null,{headers:cors()});
@@ -268,19 +271,47 @@ async function handler(req){
 
   let filtered=allPosts;
   if(group) filtered=filtered.filter(p=>p.groupId===group);
-  if(member) filtered=filtered.filter(p=>p.groupId==='kenshusei'?p.author===member:p._routeAuthor===member);
 
-  const total=filtered.length;
-  const page=filtered.slice(offset,offset+limit);
-
-  // Critical structural change: only articles returned on THIS page are enriched.
-  // RSS/Kenshusei index requests (~15) + at most 20 article requests stay below
-  // the Workers Free external-subrequest ceiling.
-  await enrichPageDetails(page);
+  let page,total,hasMore,nextOffset;
+  if(member && group && group!=='kenshusei'){
+    // v0.9.4: Ameba member view. The RSS title hint is used ONLY to skip articles
+    // that clearly name another member (traffic reduction). Articles whose hint is
+    // this member OR unknown are opened, and only those whose Ameba theme_name
+    // resolves to this member are returned. `offset`/`nextOffset` here are cursors
+    // into the candidate list, not counts of returned posts.
+    const candidates=filtered.filter(p=>p._routeAuthor===member||!p._routeAuthor);
+    total=candidates.length;
+    page=[];
+    let cursor=Math.min(offset,candidates.length),budget=MEMBER_SCAN_BUDGET;
+    while(cursor<candidates.length&&page.length<limit&&budget>0){
+      const batch=candidates.slice(cursor,cursor+Math.min(budget,10));
+      budget-=batch.length;
+      await enrichPageDetails(batch);
+      let consumed=0;
+      for(const p of batch){
+        consumed++;
+        if(p.author===member) page.push(p);
+        if(page.length>=limit) break;
+      }
+      cursor+=consumed;
+    }
+    nextOffset=cursor;
+    hasMore=cursor<candidates.length;
+  }else{
+    if(member) filtered=filtered.filter(p=>p.author===member); // Kenshusei only
+    total=filtered.length;
+    page=filtered.slice(offset,offset+limit);
+    // Critical structural change: only articles returned on THIS page are enriched.
+    // RSS/Kenshusei index requests (~15) + at most 20 article requests stay below
+    // the Workers Free external-subrequest ceiling.
+    await enrichPageDetails(page);
+    nextOffset=offset+page.length;
+    hasMore=nextOffset<total;
+  }
   for(const p of page) delete p._routeAuthor;
 
   return new Response(JSON.stringify({
-    posts:page,total,offset,limit,hasMore:offset+page.length<total,
+    posts:page,total,offset,limit,hasMore,nextOffset,
     groupCounts,memberMaster:MEMBER_MASTER,sources,updatedAt:new Date().toISOString(),
     source:'official-ameba-rss-and-kenshusei',elapsedMs:Date.now()-started
   }),{headers:{...cors(),'content-type':'application/json;charset=utf-8','cache-control':'no-store'}});
@@ -291,7 +322,7 @@ function cors(){return {'access-control-allow-origin':'*','access-control-allow-
 // from fanning out into many RSS/article requests at once.
 const API_INFLIGHT = new Map();
 function apiCacheRequest(request, tier='fresh'){
-  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_schema','v091');u.searchParams.set('__hp_cache',tier);
+  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_schema','v094');u.searchParams.set('__hp_cache',tier);
   return new Request(u.toString(),{method:'GET'});
 }
 async function cachedApi(request){

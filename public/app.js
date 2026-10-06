@@ -159,7 +159,7 @@ function hexToRgba(hex,a=.13){const h=String(hex||'').replace('#','');if(!/^[0-9
 function groupBadge(name){const g=groupByName(name);const c=g?.color||'#7d7d86';return `<span class="group-badge" style="--group-color:${c};--group-bg:${hexToRgba(c,.14)}">${esc(name)}</span>`}
 const savedNav=(()=>{try{return JSON.parse(sessionStorage.getItem('hp_nav')||'{}')}catch{return {}}})();
 let pull={startY:0,distance:0,tracking:false,refreshing:false};
-let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],loading:false,loadingMore:false,hasMore:false,total:0,banner:'',settings:false,groupCounts:{},memberMaster:{updated:'',groups:[]}};
+let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],nextOffset:0,loading:false,loadingMore:false,hasMore:false,total:0,banner:'',settings:false,groupCounts:{},memberMaster:{updated:'',groups:[]}};
 function saveNav(){sessionStorage.setItem('hp_nav',JSON.stringify({tab:state.tab,group:state.group,member:state.member}))}
 const favs=()=>new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]')); const reads=()=>new Set(JSON.parse(localStorage.getItem('hp_reads')||'[]'));
 const saveSet=(k,s)=>localStorage.setItem(k,JSON.stringify([...s]));
@@ -195,16 +195,43 @@ function bindFavoriteEffects(){
 function rel(d){let x=Date.now()-new Date(d),m=Math.floor(x/60000),h=Math.floor(x/3600000);if(m<60)return `${Math.max(1,m)}分前`;if(h<24)return `${h}時間前`;if(h<48)return `昨日 ${new Date(d).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}`;return new Date(d).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}
 
 const pageCacheKey=()=>`hp_page_v091:${state.tab}:${state.group||''}:${state.member||'all'}`;
-function savePageCache(){try{localStorage.setItem(pageCacheKey(),JSON.stringify({t:Date.now(),posts:state.posts,hasMore:state.hasMore,total:state.total,groupCounts:state.groupCounts,memberMaster:state.memberMaster}))}catch(_){}}
-function restorePageCache(){try{const v=JSON.parse(localStorage.getItem(pageCacheKey())||'null');if(!v||!Array.isArray(v.posts)||Date.now()-v.t>6*3600e3)return false;state.posts=v.posts;state.hasMore=!!v.hasMore;state.total=v.total||v.posts.length;state.groupCounts=v.groupCounts||state.groupCounts;state.memberMaster=v.memberMaster||state.memberMaster;return true}catch(_){return false}}
+function savePageCache(){try{localStorage.setItem(pageCacheKey(),JSON.stringify({t:Date.now(),posts:state.posts,nextOffset:state.nextOffset,hasMore:state.hasMore,total:state.total,groupCounts:state.groupCounts,memberMaster:state.memberMaster}))}catch(_){}}
+function restorePageCache(){try{const v=JSON.parse(localStorage.getItem(pageCacheKey())||'null');if(!v||!Array.isArray(v.posts)||Date.now()-v.t>6*3600e3)return false;state.posts=v.posts;state.nextOffset=Number.isFinite(v.nextOffset)?v.nextOffset:v.posts.length;state.hasMore=!!v.hasMore;state.total=v.total||v.posts.length;state.groupCounts=v.groupCounts||state.groupCounts;state.memberMaster=v.memberMaster||state.memberMaster;return true}catch(_){return false}}
 let prefetched=null;
 async function prefetchNext(){
  if(!state.hasMore||state.loading||state.loadingMore)return;
- const offset=state.posts.length,key=queryFor(offset,false);
+ const offset=nextCursor(),key=queryFor(offset,false);
  if(prefetched&&prefetched.key===key)return;
  try{const r=await fetch(key,{cache:'default'});if(r.ok)prefetched={key,data:await r.json()}}catch(_){}
 }
 
+// v0.9.4: the API returns nextOffset (a cursor). In the member view it is not the
+// number of posts shown, so always page with it; fall back for older responses.
+function nextCursor(){return Number.isFinite(state.nextOffset)&&state.nextOffset>0?state.nextOffset:state.posts.length}
+// Keep the card the user is looking at in place when cards are inserted above it
+// (e.g. an oshi post found in a later page moving to the top).
+function viewAnchor(){
+ if(scrollY<=0)return null;
+ for(const el of document.querySelectorAll('.card[data-post-id]')){const r=el.getBoundingClientRect();if(r.bottom>0)return {id:el.dataset.postId,top:r.top}}
+ return null;
+}
+function restoreAnchor(a){
+ if(!a)return;
+ const el=[...document.querySelectorAll('.card[data-post-id]')].find(x=>x.dataset.postId===a.id);
+ if(el){const d=el.getBoundingClientRect().top-a.top;if(Math.abs(d)>1)scrollBy(0,d)}
+}
+// v0.9.4: on 最新記事, keep loading pages in the background until 48 hours are covered,
+// so every unread oshi post that is still NEW can be pinned to the top.
+const AUTO_FILL_MAX_PAGES=8;
+let autoFillPages=0;
+// Bumped on every view change; a load that finishes for an older view is dropped
+// so background page loads never leak into the newly opened screen.
+let viewGen=0;
+function needs48hFill(){
+ if(state.tab!=='latest'||!state.hasMore||state.loading||state.loadingMore||!state.posts.length)return false;
+ const oldest=Math.min(...state.posts.map(p=>new Date(p.publishedAt).getTime()).filter(Number.isFinite));
+ return Number.isFinite(oldest)&&Date.now()-oldest<48*3600e3;
+}
 function queryFor(offset=0,bust=true){
  const q=new URLSearchParams({offset:String(offset),limit:'20'});
  if(state.tab==='groups'&&state.group) q.set('group',state.group);
@@ -215,6 +242,7 @@ function queryFor(offset=0,bust=true){
 async function load(show=true,append=false,manual=false){
  const refreshStarted=Date.now();
  if(manual) pull.refreshing=true;
+ let ok=false;const gen=viewGen;
  const keep={tab:state.tab,group:state.group,member:state.member,y:scrollY};
  // Instant paint from the previous successful page while fresh data loads behind it.
  if(!append&&!state.posts.length) restorePageCache();
@@ -222,7 +250,7 @@ async function load(show=true,append=false,manual=false){
  render();
  try{
   const oldIds=new Set(state.posts.map(x=>x.id));
-  const offset=append?state.posts.length:0;
+  const offset=append?nextCursor():0;
   const stableKey=queryFor(offset,false);
   let j;
   if(append&&prefetched&&prefetched.key===stableKey){j=prefetched.data;prefetched=null}
@@ -231,30 +259,79 @@ async function load(show=true,append=false,manual=false){
    if(!r.ok) throw new Error(`HTTP ${r.status}`);
    j=await r.json();
   }
+  if(gen!==viewGen){if(manual){pull.refreshing=false;pull.distance=0;render()}return}
   const incoming=(j.posts||[]).filter(p=>Date.now()-new Date(p.publishedAt)<30*864e5);
-  state.posts=append?[...state.posts,...incoming]:incoming;
+  if(append){const have=new Set(state.posts.map(x=>x.id));state.posts=[...state.posts,...incoming.filter(p=>!have.has(p.id))]}else state.posts=incoming;
+  state.nextOffset=Number.isFinite(j.nextOffset)?j.nextOffset:state.posts.length;
   state.hasMore=!!j.hasMore; state.total=j.total||state.posts.length; state.groupCounts=j.groupCounts||state.groupCounts; state.memberMaster=j.memberMaster||state.memberMaster;
   state.tab=keep.tab;state.group=keep.group;state.member=keep.member;
-  savePageCache();
+  savePageCache();ok=true;
   const fresh=incoming.filter(p=>!oldIds.has(p.id)).length;
   if(oldIds.size&&!append&&fresh){state.banner=`✨ 新しい記事が${fresh}件あります`;setTimeout(()=>{state.banner='';render()},3500)}
   else if(manual&&!append){const wait=Math.max(0,450-(Date.now()-refreshStarted));await new Promise(r=>setTimeout(r,wait));state.banner='✓ 新着ブログはありませんでした。';setTimeout(()=>{state.banner='';render()},2800)}
  }catch(e){
+  if(gen!==viewGen){if(manual){pull.refreshing=false;pull.distance=0;render()}return}
   console.error('Blog API error',e);
   if(!state.posts.length) state.banner='ブログ取得に失敗しました。しばらくしてから再読み込みしてください。';
  }
  if(manual){const wait=Math.max(0,650-(Date.now()-refreshStarted));if(wait)await new Promise(r=>setTimeout(r,wait));pull.refreshing=false;pull.distance=0;}
+ const anchor=append&&!restoreTarget?viewAnchor():null;
  state.loading=false;state.loadingMore=false;render();
- if(!append) requestAnimationFrame(()=>scrollTo(0,keep.y));
- setTimeout(prefetchNext,500);
+ if(append) restoreAnchor(anchor);
+ // A pending return-from-article position wins over the pre-load position.
+ let restorePending=false;
+ if(restoreTarget&&state.posts.length){if(applyRestore())finishRestore();else restorePending=true}
+ else if(!append) requestAnimationFrame(()=>scrollTo(0,keep.y));
+ if(!append) autoFillPages=0;
+ const sameView=state.tab===keep.tab&&state.group===keep.group&&state.member===keep.member;
+ // Keep loading pages automatically when: 最新記事 has not covered 48h yet, the
+ // return position lies beyond the loaded pages, or a member-view scan window
+ // returned no confirmed posts.
+ const memberEmpty=state.tab==='groups'&&state.member!=='all'&&!state.posts.length;
+ if(ok&&sameView&&state.hasMore&&autoFillPages<AUTO_FILL_MAX_PAGES&&(needs48hFill()||restorePending||memberEmpty)){
+  autoFillPages++;setTimeout(()=>{if(state.hasMore&&!state.loading&&!state.loadingMore)load(false,true)},150);
+ }else{
+  if(restoreTarget)finishRestore();
+  setTimeout(prefetchNext,500);
+ }
 }
 window.loadMore=()=>{if(!state.loadingMore&&state.hasMore)load(false,true)};
-window.openGroup=id=>{state.tab='groups';state.group=id;state.member='all';state.posts=[];saveNav();load(true,false)};
-window.selectMember=m=>{state.member=m;state.posts=[];saveNav();load(true,false)};
-window.backGroups=()=>{state.group=null;state.member='all';state.posts=[];saveNav();render()};
+window.openGroup=id=>{state.tab='groups';state.group=id;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
+window.selectMember=m=>{state.member=m;state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
+window.backGroups=()=>{state.group=null;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();render()};
+// v0.9.4: return-from-article scroll restore. Saved at tap time; restored after
+// bfcache return (pageshow persisted) or a full reload of the same view.
+const navKey=()=>`${state.tab}:${state.group||''}:${state.member||'all'}`;
+function rememberScroll(id,wasPinned){
+ try{
+  const el=[...document.querySelectorAll('.card[data-post-id]')].find(x=>x.dataset.postId===id);
+  sessionStorage.setItem('hp_scroll',JSON.stringify({nav:navKey(),id,pinned:!!wasPinned,y:scrollY,top:el?el.getBoundingClientRect().top:null,t:Date.now()}));
+ }catch(_){}
+}
+function readRestore(){
+ try{
+  const v=JSON.parse(sessionStorage.getItem('hp_scroll')||'null');
+  if(!v||typeof v!=='object'||v.nav!==navKey()||Date.now()-v.t>30*60e3)return null;
+  return v;
+ }catch(_){return null}
+}
+let restoreTarget=readRestore();
+function applyRestore(){
+ const v=restoreTarget;if(!v||!state.posts.length)return false;
+ // A pinned oshi post becomes read on tap and leaves the top, so use the pixel
+ // position for it; otherwise keep the tapped card where it was on screen.
+ // Returns true once the position is fully reached (card loaded / page tall enough).
+ const byCard=!v.pinned&&v.top!=null;
+ const el=byCard?[...document.querySelectorAll('.card[data-post-id]')].find(x=>x.dataset.postId===v.id):null;
+ const want=el?scrollY+el.getBoundingClientRect().top-v.top:v.y;
+ scrollTo(0,want);
+ return (!byCard||!!el)&&Math.abs(scrollY-want)<3;
+}
+function finishRestore(){restoreTarget=null;try{sessionStorage.removeItem('hp_scroll')}catch(_){}}
 function openPost(id){
   const p=state.posts.find(x=>x.id===id);
   if(!p||!p.url)return;
+  rememberScroll(id,isPinnedFavorite(p));
   const readSet=reads();
   readSet.add(id);
   saveSet('hp_reads',readSet);
@@ -315,10 +392,10 @@ function settings(){
  return `<div class="modal" onclick="if(event.target===this){state.settings=false;render()}"><div class="sheet"><div class="row"><b>設定</b><button class="iconbtn" onclick="state.settings=false;render()">×</button></div><div class="row"><span>表示テーマ</span><div class="theme"><button onclick="setTheme('light')">☀️ ライト</button><button onclick="setTheme('dark')">🌙 ダーク</button></div></div><h3>☆ 推しメンバー</h3><div class="fav-groups">${sections}</div></div></div>`;
 }
 window.setTheme=t=>{localStorage.setItem('hp_theme',t);document.documentElement.dataset.theme=t;render()};document.documentElement.dataset.theme=localStorage.getItem('hp_theme')||'light';
-window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
-window.goGroups=()=>{state.tab='groups';state.group=null;state.member='all';state.posts=[];saveNav();load(true,false)};
+window.goLatest=()=>{state.tab='latest';state.group=null;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
+window.goGroups=()=>{state.tab='groups';state.group=null;state.member='all';state.posts=[];state.nextOffset=0;state.loadingMore=false;viewGen++;saveNav();load(true,false)};
 function bottom(){return `<nav class="bottom"><button class="tab ${state.tab==='latest'?'on':''}" onclick="goLatest()"><span>◷</span>最新記事</button><button class="tab ${state.tab==='groups'?'on':''}" onclick="goGroups()"><span>▦</span>グループ別</button></nav>`}
-function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`;bindFavoriteEffects()}
+function render(){saveNav();document.getElementById('app').innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`;bindFavoriteEffects();if(restoreTarget&&state.posts.length)requestAnimationFrame(applyRestore)}
 function updatePtr(){const el=document.getElementById('ptr');if(!el)return;if(pull.refreshing){el.className='ptr show refreshing';el.style.transform='translateY(0) scale(1)';return}const d=Math.min(110,pull.distance);const progress=Math.min(1,d/78);el.className='ptr'+(d>4?' show':'');el.style.opacity=String(progress);el.style.transform=`translateY(${Math.max(-18,-18+d*.42)}px) scale(${.78+.22*progress})`;const sp=el.querySelector('.ptr-spinner');if(sp)sp.style.transform=`rotate(${progress*250}deg)`}
 addEventListener('touchstart',e=>{if(scrollY<=0&&!pull.refreshing){pull.startY=e.touches[0].clientY;pull.distance=0;pull.tracking=true}},{passive:true});
 addEventListener('touchmove',e=>{if(!pull.tracking||pull.refreshing)return;const dy=e.touches[0].clientY-pull.startY;if(dy<=0){pull.distance=0;updatePtr();return}pull.distance=Math.min(110,dy*.62);updatePtr();if(pull.distance>8)e.preventDefault()},{passive:false});
@@ -326,4 +403,9 @@ addEventListener('touchend',()=>{if(!pull.tracking)return;const trigger=pull.dis
 addEventListener('touchcancel',()=>{pull.tracking=false;pull.distance=0;updatePtr()},{passive:true});
 render();load(true);if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js');
 
-addEventListener('pageshow',()=>{render();let y=Number(sessionStorage.getItem('hp_scroll')||0);if(y)setTimeout(()=>scrollTo(0,y),60)});
+addEventListener('pageshow',e=>{
+ // Fresh page loads are restored by load(); this handles the bfcache return.
+ if(!e.persisted){render();return}
+ restoreTarget=readRestore();render();
+ if(restoreTarget)setTimeout(()=>{applyRestore();finishRestore()},60);
+});
