@@ -150,7 +150,7 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
  .oshi-rare .oshi-particle,.card.oshi-pinned .oshi-particle{animation:none!important}
  .card.oshi-pinned .oshi-particle{opacity:.65}
 }`;document.head.appendChild(mobileFix);
-const APP_VERSION='0.9.6';
+const APP_VERSION='0.9.7';
 const API = localStorage.getItem('hp_api') || '/api/posts';
 // Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
 const groups=[
@@ -165,8 +165,22 @@ const savedNav=(()=>{try{return JSON.parse(sessionStorage.getItem('hp_nav')||'{}
 let pull={startY:0,distance:0,tracking:false,refreshing:false};
 let state={tab:savedNav.tab||'latest',group:savedNav.group||null,member:savedNav.member||'all',posts:[],nextOffset:0,loading:false,loadingMore:false,hasMore:false,total:0,banner:'',settings:false,groupCounts:{},memberMaster:{updated:'',groups:[]}};
 function saveNav(){sessionStorage.setItem('hp_nav',JSON.stringify({tab:state.tab,group:state.group,member:state.member}))}
-const favs=()=>new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]')); const reads=()=>new Set(JSON.parse(localStorage.getItem('hp_reads')||'[]'));
-const saveSet=(k,s)=>localStorage.setItem(k,JSON.stringify([...s]));
+// v0.9.7: 推し/既読 are read from storage once per render instead of hundreds of
+// times (every card, NEW check and sort comparison used to re-parse them).
+// Storage keys and format are unchanged (hp_favs / hp_reads).
+let favsCache=null,readsCache=null;
+const favs=()=>favsCache||(favsCache=new Set(JSON.parse(localStorage.getItem('hp_favs')||'[]'))); const reads=()=>readsCache||(readsCache=new Set(JSON.parse(localStorage.getItem('hp_reads')||'[]')));
+const saveSet=(k,s)=>{localStorage.setItem(k,JSON.stringify([...s]));if(k==='hp_favs')favsCache=null;if(k==='hp_reads')readsCache=null};
+// Keep only the 2000 most recently read ids (only ~30 days of posts can be shown).
+try{const r=JSON.parse(localStorage.getItem('hp_reads')||'[]');if(Array.isArray(r)&&r.length>2000)localStorage.setItem('hp_reads',JSON.stringify(r.slice(-2000)))}catch(_){}
+// v0.9.7: Ameba thumbnails are requested at 480px wide (about 1/4 of the data);
+// if a resized image fails, that card falls back to the original image.
+const failedThumbs=new Set();
+function thumbUrl(u=''){
+ if(!/^https:\/\/stat\.ameba\.jp\/user_images\//i.test(u)||failedThumbs.has(u))return u;
+ return u.split('?')[0]+'?caw=480';
+}
+window.thumbFallback=img=>{const full=img.dataset.full;if(full&&img.getAttribute('src')!==full){failedThumbs.add(full);img.src=full}};
 function isNew(p){return !reads().has(p.id) && Date.now()-new Date(p.publishedAt).getTime()<48*3600e3}
 function isPinnedFavorite(p){return state.tab==='latest'&&!!p.author&&favs().has(p.author)&&isNew(p)}
 function latestOrderedPosts(){
@@ -321,6 +335,9 @@ function readRestore(){
  }catch(_){return null}
 }
 let restoreTarget=readRestore();
+// The app restores the return position itself; stop the browser from also
+// jumping to an old position after content loads in.
+try{if('scrollRestoration'in history)history.scrollRestoration='manual'}catch(_){}
 function applyRestore(){
  const v=restoreTarget;if(!v||!state.posts.length)return false;
  // A pinned oshi post becomes read on tap and leaves the top, so use the pixel
@@ -357,7 +374,7 @@ function card(p){let f=!!p.author&&favs().has(p.author),r=reads().has(p.id),pinn
 <span class="oshi-particle heart" style="--x:50%;--y:86%;--s:13px;--r:6deg;--d:.72s;--dx:-2px;--dy:-30px;--fx:-4px;--fy:-8px;--float:3s;--fd:-.8s">♥</span>
 <span class="oshi-particle spark" style="--x:21%;--y:48%;--s:12px;--r:0deg;--d:.76s;--dx:-8px;--dy:-25px;--fx:3px;--fy:-6px;--float:2.6s;--fd:-1.5s">✦</span>
 </span>`:'';
-return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''} ${pinned?'oshi-pinned':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')">${f?'<span class="oshi-surface" aria-hidden="true"></span>':''}${particles}<button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(p.image)}" alt="" loading="lazy">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
+return `<article data-post-id="${esc(p.id)}" class="card ${r?'read':''} ${f?'fav':''} ${pinned?'oshi-pinned':''}" style="--member:${color};--fav-outline:${favOutline}" onclick="openPost('${esc(p.id)}')">${f?'<span class="oshi-surface" aria-hidden="true"></span>':''}${particles}<button class="star" onclick="event.stopPropagation();${p.author?`toggleFav('${esc(p.author)}')`:''}">${f?'★':'☆'}</button>${p.image?`<img class="thumb" src="${esc(thumbUrl(p.image))}" data-full="${esc(p.image)}" onerror="thumbFallback(this)" alt="" loading="lazy" decoding="async">`:`<div class="thumb noimg">NO IMAGE</div>`}<div class="ct"><div class="meta">${groupBadge(p.group)}<span class="meta-time">・ ${rel(p.publishedAt)}</span> ${isNew(p)?'<span class="new">NEW</span>':''}</div><div class="member">${colorDot(p.memberColorHex)}${p.author?esc(p.author):'<span class="unknown-author">投稿者未判定</span>'} ${f?'✨':''}</div><div class="title">${esc(p.title)}</div></div></article>`}
 function esc(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 window.openPost=openPost;window.toggleFav=m=>{let s=favs();s.has(m)?s.delete(m):s.add(m);saveSet('hp_favs',s);render()};
 function topBar(){return `<header class="top"><img class="hp-idols left desktop" src="./assets/idols-left.png" alt=""><img class="hp-idols left mobile" src="./assets/idols-left-mobile.png" alt=""><div class="brand"><span>ハロプロブログ</span><span class="dots"><i style="background:#ff5f7e"></i><i style="background:#ffbd3d"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i><i style="background:#9c6ade"></i></span></div><img class="hp-idols right desktop" src="./assets/idols-right.png" alt=""><img class="hp-idols right mobile" src="./assets/idols-right-mobile.png" alt=""><button class="iconbtn" onclick="state.settings=true;render()">⚙︎</button></header>${state.loading?`<div class="status"><span class="loaderdots"><i style="background:#ff5f7e"></i><i style="background:#56c98c"></i><i style="background:#55a7f5"></i></span> 新しいブログをチェック中… ✨</div>`:''}${state.banner?`<div class="status">${state.banner}</div>`:''}`}
@@ -426,9 +443,11 @@ function keepNodes(root,render){
   if(pi&&!pi.isConnected&&pi!==img){img.replaceWith(pi);oldImgs.delete(k)}
  }
 }
-function render(){saveNav();const app=document.getElementById('app');keepNodes(app,()=>{app.innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`});bindFavoriteEffects();if(restoreTarget&&state.posts.length)requestAnimationFrame(applyRestore)}
+function render(){favsCache=readsCache=null;saveNav();const app=document.getElementById('app');keepNodes(app,()=>{app.innerHTML=`<div class="shell"><div id="ptr" class="ptr ${pull.refreshing?'show refreshing':''}"><span class="ptr-spinner"></span></div>${topBar()}${state.tab==='latest'?latest():groupView()}${bottom()}${settings()}</div>`});bindFavoriteEffects();if(restoreTarget&&state.posts.length)requestAnimationFrame(applyRestore)}
 function updatePtr(){const el=document.getElementById('ptr');if(!el)return;if(pull.refreshing){el.className='ptr show refreshing';el.style.transform='translateY(0) scale(1)';return}const d=Math.min(110,pull.distance);const progress=Math.min(1,d/78);el.className='ptr'+(d>4?' show':'');el.style.opacity=String(progress);el.style.transform=`translateY(${Math.max(-18,-18+d*.42)}px) scale(${.78+.22*progress})`;const sp=el.querySelector('.ptr-spinner');if(sp)sp.style.transform=`rotate(${progress*250}deg)`}
-addEventListener('touchstart',e=>{if(scrollY<=0&&!pull.refreshing){pull.startY=e.touches[0].clientY;pull.distance=0;pull.tracking=true}},{passive:true});
+// v0.9.7: once the user scrolls by hand, stop any pending return-position restore.
+addEventListener('wheel',()=>{if(restoreTarget)finishRestore()},{passive:true});
+addEventListener('touchstart',e=>{if(restoreTarget)finishRestore();if(scrollY<=0&&!pull.refreshing){pull.startY=e.touches[0].clientY;pull.distance=0;pull.tracking=true}},{passive:true});
 addEventListener('touchmove',e=>{if(!pull.tracking||pull.refreshing)return;const dy=e.touches[0].clientY-pull.startY;if(dy<=0){pull.distance=0;updatePtr();return}pull.distance=Math.min(110,dy*.62);updatePtr();if(pull.distance>8)e.preventDefault()},{passive:false});
 addEventListener('touchend',()=>{if(!pull.tracking)return;const trigger=pull.distance>=72;pull.tracking=false;if(trigger){pull.refreshing=true;updatePtr();load(false,false,true)}else{pull.distance=0;updatePtr()}},{passive:true});
 addEventListener('touchcancel',()=>{pull.tracking=false;pull.distance=0;updatePtr()},{passive:true});

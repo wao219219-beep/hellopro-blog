@@ -124,8 +124,57 @@ function applyMember(post,member){
   post.author=member.name;post.memberColor=member.color;post.memberColorHex=member.hex;
 }
 
-async function enrichPageDetails(posts){
-  const targets = posts.filter(p => /^https:\/\/ameblo\.jp\//i.test(p.url) || (!p.image && /^https:\/\/www\.upfc\.jp\/helloproject\/artist\/trcontents_detail\.php/i.test(p.url)));
+// v0.9.7: remembered per-article results (author name + thumbnail URL) so an
+// article page is downloaded and parsed only once. The author is still decided
+// ONLY by the Ameba theme_name; a remembered name is re-checked against
+// MEMBER_MASTER and colors are always taken from the current master. Failed or
+// unresolved results are never remembered, so they are retried next time.
+const DETAIL_MEMO=new Map();
+let detailMemoDirty=false,detailMemoLoadedAt=0;
+// Internal cache keys live under the app's own origin (set per request).
+let CACHE_ORIGIN='https://hellopro-blog.wao219219.workers.dev';
+const DETAIL_MEMO_KEY=()=>`${CACHE_ORIGIN}/__hp/detail-memo-v1`;
+const isAmeba=u=>/^https:\/\/ameblo\.jp\//i.test(u||'');
+const needsDetail=p=>isAmeba(p.url) || (!p.image && /^https:\/\/www\.upfc\.jp\/helloproject\/artist\/trcontents_detail\.php/i.test(p.url));
+function applyMemo(p){
+  const rec=DETAIL_MEMO.get(p.url);
+  if(!rec) return false;
+  if(isAmeba(p.url)){
+    const member=memberRecord(p.groupId,rec.a);
+    if(!member) return false;
+    applyMember(p,member);
+  }
+  if(rec.i) p.image=rec.i;
+  return true;
+}
+function rememberDetail(p){
+  if(isAmeba(p.url)){ if(!p.author) return; DETAIL_MEMO.set(p.url,{a:p.author,i:p.image||''}); }
+  else { if(!p.image) return; DETAIL_MEMO.set(p.url,{a:'',i:p.image}); }
+  detailMemoDirty=true;
+}
+async function loadDetailMemo(){
+  // Merge what other Worker instances saved (at most once a minute per instance).
+  if(Date.now()-detailMemoLoadedAt<60e3) return;
+  detailMemoLoadedAt=Date.now();
+  try{
+    const r=await caches.default.match(DETAIL_MEMO_KEY());
+    if(!r) return;
+    const saved=await r.json();
+    for(const [k,v] of Object.entries(saved||{})) if(!DETAIL_MEMO.has(k)&&v&&typeof v==='object') DETAIL_MEMO.set(k,v);
+  }catch(_){}
+}
+async function saveDetailMemo(liveUrls){
+  if(!detailMemoDirty) return;
+  // Keep only articles still inside the 30-day index.
+  for(const k of DETAIL_MEMO.keys()) if(!liveUrls.has(k)) DETAIL_MEMO.delete(k);
+  try{
+    await caches.default.put(DETAIL_MEMO_KEY(),new Response(JSON.stringify(Object.fromEntries(DETAIL_MEMO)),{headers:{'content-type':'application/json','cache-control':'public, max-age=2592000'}}));
+    detailMemoDirty=false;
+  }catch(_){}
+}
+// Returns the number of article pages actually downloaded.
+async function enrichPageDetails(posts,fetchBudget=Infinity){
+  const targets = posts.filter(p => needsDetail(p) && !applyMemo(p)).slice(0,Math.max(0,fetchBudget));
   const concurrency = 6;
   let cursor = 0;
   async function worker(){
@@ -154,11 +203,12 @@ async function enrichPageDetails(posts){
         }
         if(!p.image&&!img) img=articleImageFromHTML(html);
         if (img) p.image = img;
+        rememberDetail(p);
       } catch (_) {}
     }
   }
   await Promise.all(Array.from({length: Math.min(concurrency, targets.length)}, worker));
-  return posts;
+  return targets.length;
 }
 
 function parseRSS(xml,groupId,group){
@@ -212,7 +262,7 @@ function parseKenshu(html){
   return out;
 }
 
-async function getPostIndex(){
+async function buildPostIndex(){
   const settled=await Promise.allSettled(BLOGS.map(fetchBlog));
   let posts=settled.flatMap(x=>x.status==='fulfilled'?x.value.posts:[]);
   const sources=settled.map((x,i)=>({
@@ -251,19 +301,46 @@ async function getPostIndex(){
   return {posts,sources};
 }
 
-// Max article-detail fetches per member-view request: ~15 index requests + 30
-// stays below the Workers Free 50-subrequest ceiling.
-const MEMBER_SCAN_BUDGET=30;
+// v0.9.7: the 30-day index is rebuilt on every first-page request (offset=0:
+// open / pull-to-refresh, so freshness is unchanged) and reused for up to 60s by
+// the follow-up page requests (さらに読み込む / 48h background loading).
+const INDEX_KEY=()=>`${CACHE_ORIGIN}/__hp/post-index-v1`;
+const INDEX_REUSE_MS=60e3;
+let memIndex=null;
+async function getPostIndex(reuse){
+  if(reuse){
+    if(memIndex&&Date.now()-memIndex.t<INDEX_REUSE_MS) return {...memIndex.v,fetched:0,cacheOps:0};
+    try{
+      const r=await caches.default.match(INDEX_KEY());
+      if(r){const v=await r.json();if(v&&Date.now()-v.t<INDEX_REUSE_MS){memIndex=v;return {...v.v,fetched:0,cacheOps:1}}}
+    }catch(_){}
+  }
+  const v=await buildPostIndex();
+  memIndex={t:Date.now(),v};
+  try{await caches.default.put(INDEX_KEY(),new Response(JSON.stringify(memIndex),{headers:{'content-type':'application/json','cache-control':'public, max-age=120'}}))}catch(_){}
+  return {...v,fetched:BLOGS.length+1,cacheOps:reuse?2:1};
+}
+// Workers Free allows 50 subrequests per request, and Cache API calls count too.
+// Reserve: API cache (match fresh, put fresh+stale, match stale on error) = 4,
+// detail memo (match + put) = 2, safety margin = 2, plus whatever the index used.
+const SUBREQUEST_LIMIT=50;
+const MEMBER_SCAN_MAX=30;
 async function handler(req){
   const started=Date.now();
   if(req.method==='OPTIONS') return new Response(null,{headers:cors()});
   const u=new URL(req.url);
+  CACHE_ORIGIN=u.origin;
   const offset=Math.max(0,Number.parseInt(u.searchParams.get('offset')||'0',10)||0);
   const limit=Math.min(20,Math.max(1,Number.parseInt(u.searchParams.get('limit')||'20',10)||20));
   const group=u.searchParams.get('group')||'';
   const member=u.searchParams.get('member')||'';
 
-  const {posts:allPosts,sources}=await getPostIndex();
+  const idx=await getPostIndex(offset>0);
+  const {posts:indexPosts,sources}=idx;
+  // Work on copies: the index may be reused by later requests in this instance.
+  const allPosts=indexPosts.map(p=>({...p}));
+  const fetchBudget=Math.max(0,SUBREQUEST_LIMIT-4-2-2-idx.fetched-idx.cacheOps);
+  await loadDetailMemo();
 
   // Counts are computed from the complete 30-day metadata index, not just this page.
   const groupCounts={};
@@ -282,11 +359,19 @@ async function handler(req){
     const candidates=filtered.filter(p=>p._routeAuthor===member||!p._routeAuthor);
     total=candidates.length;
     page=[];
-    let cursor=Math.min(offset,candidates.length),budget=MEMBER_SCAN_BUDGET;
-    while(cursor<candidates.length&&page.length<limit&&budget>0){
-      const batch=candidates.slice(cursor,cursor+Math.min(budget,10));
-      budget-=batch.length;
-      await enrichPageDetails(batch);
+    let cursor=Math.min(offset,candidates.length),budget=Math.min(MEMBER_SCAN_MAX,fetchBudget);
+    while(cursor<candidates.length&&page.length<limit){
+      // Remembered articles cost nothing; only downloads count against the budget.
+      const batch=[];
+      let need=0;
+      for(let i=cursor;i<candidates.length&&batch.length<40;i++){
+        const p=candidates[i];
+        const known=!needsDetail(p)||applyMemo(p);
+        if(!known){ if(need>=Math.min(budget,10)) break; need++; }
+        batch.push(p);
+      }
+      if(!batch.length) break; // download budget used up
+      budget-=await enrichPageDetails(batch,need);
       let consumed=0;
       for(const p of batch){
         consumed++;
@@ -304,11 +389,12 @@ async function handler(req){
     // Critical structural change: only articles returned on THIS page are enriched.
     // RSS/Kenshusei index requests (~15) + at most 20 article requests stay below
     // the Workers Free external-subrequest ceiling.
-    await enrichPageDetails(page);
+    await enrichPageDetails(page,fetchBudget);
     nextOffset=offset+page.length;
     hasMore=nextOffset<total;
   }
   for(const p of page) delete p._routeAuthor;
+  await saveDetailMemo(new Set(indexPosts.map(p=>p.url)));
 
   return new Response(JSON.stringify({
     posts:page,total,offset,limit,hasMore,nextOffset,
@@ -322,7 +408,7 @@ function cors(){return {'access-control-allow-origin':'*','access-control-allow-
 // from fanning out into many RSS/article requests at once.
 const API_INFLIGHT = new Map();
 function apiCacheRequest(request, tier='fresh'){
-  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_schema','v094');u.searchParams.set('__hp_cache',tier);
+  const u=new URL(request.url);u.searchParams.delete('_');u.searchParams.set('__hp_schema','v097');u.searchParams.set('__hp_cache',tier);
   return new Request(u.toString(),{method:'GET'});
 }
 async function cachedApi(request){
