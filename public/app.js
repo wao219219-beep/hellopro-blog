@@ -150,7 +150,7 @@ const mobileFix=document.createElement('style');mobileFix.textContent=`
  .oshi-rare .oshi-particle,.card.oshi-pinned .oshi-particle{animation:none!important}
  .card.oshi-pinned .oshi-particle{opacity:.65}
 }`;document.head.appendChild(mobileFix);
-const APP_VERSION='0.9.5';
+const APP_VERSION='0.9.6';
 const API = localStorage.getItem('hp_api') || '/api/posts';
 // Group colors sampled from the user-provided Hello! Project ARTIST reference image (v0.8.4).
 const groups=[
@@ -413,7 +413,11 @@ function keepNodes(root,render){
  const oldCards=new Map(),oldImgs=new Map();
  for(const el of root.querySelectorAll('.card[data-post-id]'))if(!oldCards.has(el.dataset.postId))oldCards.set(el.dataset.postId,{el,sig:cardSig(el)});
  for(const img of root.querySelectorAll('img.thumb')){const k=img.getAttribute('src');if(k&&!oldImgs.has(k))oldImgs.set(k,img)}
+ // v0.9.6: the header pixel-art idols were recreated on every render too (flicker).
+ const oldIdols=new Map();
+ for(const img of root.querySelectorAll('img.hp-idols'))oldIdols.set(img.className+'|'+img.getAttribute('src'),img);
  render();
+ for(const img of root.querySelectorAll('img.hp-idols')){const prev=oldIdols.get(img.className+'|'+img.getAttribute('src'));if(prev&&prev!==img)img.replaceWith(prev)}
  if(!oldCards.size)return;
  for(const el of root.querySelectorAll('.card[data-post-id]')){
   const prev=oldCards.get(el.dataset.postId);
